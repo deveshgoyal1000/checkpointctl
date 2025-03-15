@@ -47,11 +47,29 @@ type checkpointInfo struct {
 }
 
 func getPodmanInfo(containerConfig *metadata.ContainerConfig, _ *spec.Spec) *containerInfo {
-	return &containerInfo{
+	info := &containerInfo{
 		Name:    containerConfig.Name,
 		Created: containerConfig.CreatedTime.Format(time.RFC3339),
 		Engine:  "Podman",
 	}
+	
+	// Try to read network information from network.status file if it exists
+	networkStatus, _, err := metadata.ReadContainerNetworkStatus(filepath.Dir(filepath.Dir(metadata.CheckpointDirectory)))
+	if err == nil && networkStatus != nil {
+		// Extract the first interface's first subnet IP and MAC address
+		for _, iface := range networkStatus.Podman.Interfaces {
+			if len(iface.Subnets) > 0 {
+				// Extract IP without subnet prefix
+				ipWithSubnet := iface.Subnets[0].IPNet
+				ipOnly := strings.Split(ipWithSubnet, "/")[0]
+				info.IP = ipOnly
+				info.MAC = iface.MacAddress
+				break
+			}
+		}
+	}
+	
+	return info
 }
 
 func getContainerdInfo(containerConfig *metadata.ContainerConfig, specDump *spec.Spec) *containerInfo {
