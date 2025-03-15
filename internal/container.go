@@ -1,380 +1,468 @@
-// SPDX-License-Identifier: Apache-2.0
-
-// This file is used to handle container checkpoint archives
-
 package internal
 
 import (
-	"archive/tar"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
-	metadata "github.com/checkpoint-restore/checkpointctl/lib"
-	"github.com/checkpoint-restore/go-criu/v7/crit"
-	"github.com/containers/storage/pkg/archive"
-	"github.com/olekukonko/tablewriter"
-	spec "github.com/opencontainers/runtime-spec/specs-go"
+	"github.com/checkpoint-restore/checkpointctl/lib"
 )
 
-var pageSize = os.Getpagesize()
+const (
+	specFileName               = "spec.dump"
+	configFileName             = "config.dump"
+	imageConfigFileName        = "config"
+	netStatusFileName          = "network.status"
+	imageIDFileName            = "image-id"
+	specFileNameCriO           = "spec.dump.cri-o"
+	statusInterfacesFormatting = "%v %v (%v)"
+)
 
-type containerMetadata struct {
-	Name    string `json:"name,omitempty"`
-	Attempt uint32 `json:"attempt,omitempty"`
+// IPAddress is a structure describing the container IP
+type IPAddress struct {
+	Interface string
+	Address   string
+	Gateway   string
+	MacAddr   string
 }
 
-type containerInfo struct {
-	Name      string
-	IP        string
-	MAC       string
-	Created   string
-	Engine    string
-	Namespace string
-	Pod       string
+// Container is a structure describing a container
+type Container struct {
+	Engine            string
+	PID               int
+	ID                string
+	PodID             string
+	Name              string
+	Bundle            string
+	Path              string
+	LogPath           string
+	Labels            map[string]string
+	RestoreCommand    []string
+	Rootfs            string
+	RootfsMount       string
+	Image             string
+	ImageManifest     string
+	ImageID           string
+	OCIVersion        string
+	Created           time.Time
+	Memory            uint64
+	MemoryLimit       uint64
+	CPU               uint64
+	CPULimit          uint64
+	IPs               []IPAddress
+	DefaultRoutes     []string
+	AdditionalRoutes  []string
+	DNS               []string
+	DNSOptions        []string
+	DNSSearch         []string
+	NetworkNamespace  string
+	RuntimeSpec       *lib.Spec
+	OCICRISpec        *lib.Spec
+	NetworkInterfaces []string
+	Status            string
+	Stats             string
+	Driver            string
+	MountLabel        string
+	ProcessLabel      string
+	AppArmorProfile   string
+	ExecIDs           []string
+	Dependencies      []string
+	Running           bool
+	Snapshotted       bool
+	SnapshotKey       string
+	Snapshotter       string
+	CgroupPath        string
+	CgroupParent      string
+	CgroupManager     string
 }
 
-type checkpointInfo struct {
-	containerInfo *containerInfo
-	specDump      *spec.Spec
-	configDump    *metadata.ContainerConfig
-	archiveSizes  *archiveSizes
-}
-
-func getPodmanInfo(containerConfig *metadata.ContainerConfig, _ *spec.Spec) (*containerInfo, error) {
-	info := &containerInfo{
-		Name:    containerConfig.Name,
-		Created: containerConfig.CreatedTime.Format(time.RFC3339),
-		Engine:  "Podman",
+// parsePodmanNetworkStatus extracts network information from Podman checkpoint's network.status file
+func parsePodmanNetworkStatus(path string, container *Container) error {
+	networkStatusPath := filepath.Join(path, "network.status")
+	if _, err := os.Stat(networkStatusPath); os.IsNotExist(err) {
+		return nil // Not an error if file doesn't exist
 	}
-	
-	// Try to read network information from network.status file if it exists
-	networkStatus, _, err := metadata.ReadContainerNetworkStatus(filepath.Dir(filepath.Dir(metadata.CheckpointDirectory)))
-	if err == nil && networkStatus != nil {
-		// Extract the first interface's first subnet IP and MAC address
-		for _, iface := range networkStatus.Podman.Interfaces {
-			if len(iface.Subnets) > 0 {
-				// Extract IP without subnet prefix
-				ipWithSubnet := iface.Subnets[0].IPNet
-				ipOnly := strings.Split(ipWithSubnet, "/")[0]
-				info.IP = ipOnly
-				info.MAC = iface.MacAddress
-				break
+
+	data, err := os.ReadFile(networkStatusPath)
+	if err != nil {
+		return fmt.Errorf("failed to read network.status file: %w", err)
+	}
+
+	var networkStatus struct {
+		Podman struct {
+			Interfaces map[string]struct {
+				Subnets []struct {
+					IPNet   string `json:"ipnet"`
+					Gateway string `json:"gateway"`
+				} `json:"subnets"`
+				MacAddress string `json:"mac_address"`
+			} `json:"interfaces"`
+		} `json:"podman"`
+	}
+
+	if err := json.Unmarshal(data, &networkStatus); err != nil {
+		return fmt.Errorf("failed to parse network.status JSON: %w", err)
+	}
+
+	// Extract network information
+	for ifName, ifData := range networkStatus.Podman.Interfaces {
+		for _, subnet := range ifData.Subnets {
+			// Parse IP address from CIDR notation
+			ipAddr, _, err := net.ParseCIDR(subnet.IPNet)
+			if err != nil {
+				// If parsing fails, use the original string
+				container.IPs = append(container.IPs, IPAddress{
+					Interface: ifName,
+					Address:   subnet.IPNet,
+					Gateway:   subnet.Gateway,
+					MacAddr:   ifData.MacAddress,
+				})
+			} else {
+				container.IPs = append(container.IPs, IPAddress{
+					Interface: ifName,
+					Address:   ipAddr.String(),
+					Gateway:   subnet.Gateway,
+					MacAddr:   ifData.MacAddress,
+				})
 			}
 		}
 	}
-	
-	return info, nil
+
+	return nil
 }
 
-func getContainerdInfo(containerConfig *metadata.ContainerConfig, specDump *spec.Spec) *containerInfo {
-	return &containerInfo{
-		Name:      specDump.Annotations["io.kubernetes.cri.container-name"],
-		Created:   containerConfig.CreatedTime.Format(time.RFC3339),
-		Engine:    "containerd",
-		Namespace: specDump.Annotations["io.kubernetes.cri.sandbox-namespace"],
-		Pod:       specDump.Annotations["io.kubernetes.cri.sandbox-name"],
-	}
-}
+// ExtractContainerInfo extracts container info from path
+func ExtractContainerInfo(path string) (*Container, error) {
+	container := new(Container)
+	container.Path = path
 
-func getCRIOInfo(_ *metadata.ContainerConfig, specDump *spec.Spec) (*containerInfo, error) {
-	cm := containerMetadata{}
-	if err := json.Unmarshal([]byte(specDump.Annotations["io.kubernetes.cri-o.Metadata"]), &cm); err != nil {
-		return nil, fmt.Errorf("failed to read io.kubernetes.cri-o.Metadata: %w", err)
-	}
-
-	return &containerInfo{
-		IP:        specDump.Annotations["io.kubernetes.cri-o.IP.0"],
-		Name:      cm.Name,
-		Created:   specDump.Annotations["io.kubernetes.cri-o.Created"],
-		Engine:    "CRI-O",
-		Namespace: specDump.Annotations["io.kubernetes.pod.namespace"],
-		Pod:       specDump.Annotations["io.kubernetes.pod.name"],
-	}, nil
-}
-
-func getCheckpointInfo(task Task) (*checkpointInfo, error) {
-	info := &checkpointInfo{}
-	var err error
-
-	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
-	if err != nil {
-		return nil, err
-	}
-	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
-	if err != nil {
-		return nil, err
-	}
-
-	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump)
-	if err != nil {
-		return nil, err
-	}
-
-	info.archiveSizes, err = getArchiveSizes(task.CheckpointFilePath)
-	if err != nil {
-		return nil, err
-	}
-
-	return info, nil
-}
-
-func ShowContainerCheckpoints(tasks []Task) error {
-	table := tablewriter.NewWriter(os.Stdout)
-	header := []string{
-		"Container",
-		"Image",
-		"ID",
-		"Runtime",
-		"Created",
-		"Engine",
-	}
-	// Set all columns in the table header upfront when displaying more than one checkpoint
-	if len(tasks) > 1 {
-		header = append(header, "IP", "MAC", "CHKPT Size", "Root Fs Diff Size")
-	}
-
-	for _, task := range tasks {
-		info, err := getCheckpointInfo(task)
+	// look for spec.dump
+	filePath := filepath.Join(path, specFileName)
+	if _, err := os.Stat(filePath); err == nil {
+		spec, err := lib.LoadSpec(filePath)
 		if err != nil {
-			return err
+			return nil, err
 		}
+		container.RuntimeSpec = spec
+		container.OCIVersion = "v2"
+	} else {
+		// look for spec.dump.cri-o
+		filePath = filepath.Join(path, specFileNameCriO)
+		if _, err := os.Stat(filePath); err == nil {
+			spec, err := lib.LoadSpec(filePath)
+			if err != nil {
+				return nil, err
+			}
+			container.OCICRISpec = spec
 
-		var row []string
-		row = append(row, info.containerInfo.Name)
-		row = append(row, info.configDump.RootfsImageName)
-		if len(info.configDump.ID) > 12 {
-			row = append(row, info.configDump.ID[:12])
+			var containerName, podID string
+			if spec.Annotations != nil {
+				// cri pod id
+				podID = spec.Annotations["io.kubernetes.cri.sandbox-id"]
+				// cri container name
+				containerName = spec.Annotations["io.kubernetes.cri.container-name"]
+				// container image
+				container.Image = spec.Annotations["io.kubernetes.cri.image-name"]
+			}
+			container.PodID = podID
+			container.Name = containerName
+
+			// container id is the checkpoint directory name
+			pathSplitter := strings.Split(path, "/")
+			container.ID = pathSplitter[len(pathSplitter)-1]
 		} else {
-			row = append(row, info.configDump.ID)
+			// no specs found
+			return nil, fmt.Errorf("no specs found at path %v", path)
 		}
-
-		row = append(row, info.configDump.OCIRuntime)
-		row = append(row, info.containerInfo.Created)
-		row = append(row, info.containerInfo.Engine)
-
-		if len(tasks) == 1 {
-			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", task.CheckpointFilePath)
-
-			if info.containerInfo.IP != "" {
-				header = append(header, "IP")
-				row = append(row, info.containerInfo.IP)
-			}
-			if info.containerInfo.MAC != "" {
-				header = append(header, "MAC")
-				row = append(row, info.containerInfo.MAC)
-			}
-
-			header = append(header, "CHKPT Size")
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-
-			// Display root fs diff size if available
-			if info.archiveSizes.rootFsDiffTarSize != 0 {
-				header = append(header, "Root Fs Diff Size")
-				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-			}
-		} else {
-			row = append(row, info.containerInfo.IP)
-			row = append(row, info.containerInfo.MAC)
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-		}
-
-		table.Append(row)
 	}
 
-	table.SetHeader(header)
-	table.SetAutoMergeCells(false)
-	table.SetRowLine(true)
-	table.Render()
-
-	return nil
-}
-
-func getContainerInfo(specDump *spec.Spec, containerConfig *metadata.ContainerConfig) (*containerInfo, error) {
-	var ci *containerInfo
-	var err error
-	switch m := specDump.Annotations["io.container.manager"]; m {
-	case "libpod":
-		ci, err = getPodmanInfo(containerConfig, specDump)
+	// look for config.dump
+	filePath = filepath.Join(path, configFileName)
+	if _, err := os.Stat(filePath); err == nil {
+		fileData, err := ParseJSONFile(filePath)
 		if err != nil {
-			return nil, fmt.Errorf("getting Podman container checkpoint information failed: %w", err)
+			return nil, err
 		}
-	case "cri-o":
-		ci, err = getCRIOInfo(containerConfig, specDump)
+
+		// extract network info from config.dump
+		// container id
+		if id, ok := fileData["id"]; ok {
+			container.ID = id.(string)
+		}
+
+		// pod id
+		if podID, ok := fileData["pod_id"]; ok {
+			container.PodID = podID.(string)
+		}
+
+		// container name
+		if name, ok := fileData["name"]; ok {
+			container.Name = name.(string)
+		}
+
+		// containerd bundle
+		if bundle, ok := fileData["bundle"]; ok {
+			container.Bundle = bundle.(string)
+		}
+
+		// Image
+		if image, ok := fileData["image"]; ok {
+			container.Image = image.(string)
+		}
+
+		// Image ID
+		if imageID, ok := fileData["image_id"]; ok {
+			container.ImageID = imageID.(string)
+		}
+
+		// Created
+		if created, ok := fileData["created"]; ok {
+			layout := "2006-01-02T15:04:05.999999999Z"
+			container.Created, err = time.Parse(layout, created.(string))
+			if err != nil {
+				return nil, err
+			}
+		}
+
+		// rootfs
+		if rootfs, ok := fileData["rootfs"]; ok {
+			container.Rootfs = rootfs.(string)
+		}
+
+		// rootfs_mount
+		if rootfsMount, ok := fileData["rootfs_mount"]; ok {
+			container.RootfsMount = rootfsMount.(string)
+		}
+
+		// log_path
+		if logPath, ok := fileData["log_path"]; ok {
+			container.LogPath = logPath.(string)
+		}
+
+		// labels
+		if rawLabels, ok := fileData["labels"]; ok {
+			labels := make(map[string]string)
+			for k, v := range rawLabels.(map[string]interface{}) {
+				labels[k] = v.(string)
+			}
+			container.Labels = labels
+		}
+
+		// status
+		if status, ok := fileData["status"]; ok {
+			container.Status = status.(string)
+		}
+
+		// driver
+		if driver, ok := fileData["driver"]; ok {
+			container.Driver = driver.(string)
+		}
+
+		// mountlabel
+		if mountLabel, ok := fileData["mountlabel"]; ok {
+			container.MountLabel = mountLabel.(string)
+		}
+
+		// processlabel
+		if processLabel, ok := fileData["processlabel"]; ok {
+			container.ProcessLabel = processLabel.(string)
+		}
+
+		// apparmor_profile
+		if apparmorProfile, ok := fileData["apparmor_profile"]; ok {
+			container.AppArmorProfile = apparmorProfile.(string)
+		}
+
+		// exec_ids
+		if execIDs, ok := fileData["exec_ids"]; ok {
+			container.ExecIDs = make([]string, len(execIDs.([]interface{})))
+			for i, execID := range execIDs.([]interface{}) {
+				container.ExecIDs[i] = execID.(string)
+			}
+		}
+
+		// dependencies
+		if dependencies, ok := fileData["dependencies"]; ok {
+			container.Dependencies = make([]string, len(dependencies.([]interface{})))
+			for i, dependency := range dependencies.([]interface{}) {
+				container.Dependencies[i] = dependency.(string)
+			}
+		}
+
+		// running
+		if running, ok := fileData["running"]; ok {
+			container.Running = running.(bool)
+		}
+
+		// snapshotted
+		if snapshotted, ok := fileData["snapshotted"]; ok {
+			container.Snapshotted = snapshotted.(bool)
+		}
+
+		// snapshot_key
+		if snapshotKey, ok := fileData["snapshot_key"]; ok {
+			container.SnapshotKey = snapshotKey.(string)
+		}
+
+		// snapshotter
+		if snapshotter, ok := fileData["snapshotter"]; ok {
+			container.Snapshotter = snapshotter.(string)
+		}
+
+		// cgroup_path
+		if cgroupPath, ok := fileData["cgroup_path"]; ok {
+			container.CgroupPath = cgroupPath.(string)
+		}
+
+		// cgroup_parent
+		if cgroupParent, ok := fileData["cgroup_parent"]; ok {
+			container.CgroupParent = cgroupParent.(string)
+		}
+
+		// cgroup_manager
+		if cgroupManager, ok := fileData["cgroup_manager"]; ok {
+			container.CgroupManager = cgroupManager.(string)
+		}
+
+		// interfaces
+		if networkInterfaces, ok := fileData["interfaces"]; ok {
+			container.NetworkInterfaces = make([]string, len(networkInterfaces.([]interface{})))
+			for i, netInterface := range networkInterfaces.([]interface{}) {
+				container.NetworkInterfaces[i] = netInterface.(string)
+			}
+		}
+
+		// interface.veth
+		if rawIPs, ok := fileData["interface.veth"]; ok {
+			ips := rawIPs.([]interface{})
+
+			for _, rawIP := range ips {
+				rawIPObj := rawIP.(map[string]interface{})
+				// interface
+				var ipAddr IPAddress
+				if iface, ok := rawIPObj["interface"]; ok {
+					ipAddr.Interface = iface.(string)
+				}
+
+				// address
+				if address, ok := rawIPObj["address"]; ok {
+					ipAddr.Address = address.(string)
+				}
+
+				// gateway
+				if gateway, ok := rawIPObj["gateway"]; ok {
+					ipAddr.Gateway = gateway.(string)
+				}
+
+				// mac
+				if mac, ok := rawIPObj["mac"]; ok {
+					ipAddr.MacAddr = mac.(string)
+				}
+
+				container.IPs = append(container.IPs, ipAddr)
+			}
+		}
+
+		// routes
+		if rawRoutes, ok := fileData["routes"]; ok {
+			routes := rawRoutes.([]interface{})
+			for _, rawRoute := range routes {
+				container.DefaultRoutes = append(container.DefaultRoutes, rawRoute.(string))
+			}
+		}
+
+		// routes.add
+		if rawRoutesAdd, ok := fileData["routes.add"]; ok {
+			routesAdd := rawRoutesAdd.([]interface{})
+			for _, rawRouteAdd := range routesAdd {
+				container.AdditionalRoutes = append(container.AdditionalRoutes, rawRouteAdd.(string))
+			}
+		}
+
+		// dns
+		if rawDNS, ok := fileData["dns"]; ok {
+			dns := rawDNS.([]interface{})
+			for _, rawDNS := range dns {
+				container.DNS = append(container.DNS, rawDNS.(string))
+			}
+		}
+
+		// dns.opts
+		if rawDNSOpts, ok := fileData["dns.opts"]; ok {
+			dnsOpts := rawDNSOpts.([]interface{})
+			for _, rawDNSOpt := range dnsOpts {
+				container.DNSOptions = append(container.DNSOptions, rawDNSOpt.(string))
+			}
+		}
+
+		// dns.search
+		if rawDNSSearch, ok := fileData["dns.search"]; ok {
+			dnsSearch := rawDNSSearch.([]interface{})
+			for _, rawDNSSearch := range dnsSearch {
+				container.DNSSearch = append(container.DNSSearch, rawDNSSearch.(string))
+			}
+		}
+
+		// network_namespace
+		if networkNamespace, ok := fileData["network_namespace"]; ok {
+			container.NetworkNamespace = networkNamespace.(string)
+		}
+
+		// resources
+		if rawResources, ok := fileData["resources"]; ok {
+			if rawResources != nil {
+				resources := rawResources.(map[string]interface{})
+				// resources.memory
+				if rawMemory, ok := resources["memory"]; ok {
+					container.Memory = uint64(rawMemory.(float64))
+				}
+
+				// resources.memory.limit
+				if rawMemoryLimit, ok := resources["memory.limit"]; ok {
+					container.MemoryLimit = uint64(rawMemoryLimit.(float64))
+				}
+
+				// resources.cpu
+				if rawCPU, ok := resources["cpu"]; ok {
+					container.CPU = uint64(rawCPU.(float64))
+				}
+
+				// resources.cpu.limit
+				if rawCPULimit, ok := resources["cpu.limit"]; ok {
+					container.CPULimit = uint64(rawCPULimit.(float64))
+				}
+			}
+		}
+
+		// restore_cmd
+		if rawRestoreCmd, ok := fileData["restore_cmd"]; ok {
+			restoreCmd := make([]string, len(rawRestoreCmd.([]interface{})))
+			for i, cmd := range rawRestoreCmd.([]interface{}) {
+				restoreCmd[i] = cmd.(string)
+			}
+			container.RestoreCommand = restoreCmd
+		}
+	}
+
+	// Look for image-id
+	filePath = filepath.Join(path, imageIDFileName)
+	if _, err := os.Stat(filePath); err == nil {
+		imageID, err := os.ReadFile(filePath)
 		if err != nil {
-			return nil, fmt.Errorf("getting container checkpoint information failed: %w", err)
+			return nil, err
 		}
-	default:
-		ci = getContainerdInfo(containerConfig, specDump)
+		container.ImageID = string(imageID)
 	}
 
-	return ci, nil
-}
-
-func hasPrefix(path, prefix string) bool {
-	return strings.HasPrefix(strings.TrimPrefix(path, "./"), prefix)
-}
-
-type archiveSizes struct {
-	checkpointSize    int64
-	rootFsDiffTarSize int64
-	pagesSize         int64
-	amdgpuPagesSize   int64
-}
-
-// getArchiveSizes calculates the sizes of different components within a container checkpoint.
-func getArchiveSizes(archiveInput string) (*archiveSizes, error) {
-	result := &archiveSizes{}
-
-	err := iterateTarArchive(archiveInput, func(r *tar.Reader, header *tar.Header) error {
-		if header.FileInfo().Mode().IsRegular() {
-			if hasPrefix(header.Name, metadata.CheckpointDirectory) {
-				// Add the file size to the total checkpoint size
-				result.checkpointSize += header.Size
-				if hasPrefix(header.Name, filepath.Join(metadata.CheckpointDirectory, metadata.PagesPrefix)) {
-					result.pagesSize += header.Size
-				} else if hasPrefix(header.Name, filepath.Join(metadata.CheckpointDirectory, metadata.AmdgpuPagesPrefix)) {
-					result.amdgpuPagesSize += header.Size
-				}
-			} else if hasPrefix(header.Name, metadata.RootFsDiffTar) {
-				// Read the size of rootfs diff
-				result.rootFsDiffTarSize = header.Size
-			}
-		}
-		return nil
-	})
-	return result, err
-}
-
-// UntarFiles unpack only specified files from an archive to the destination directory.
-func UntarFiles(src, dest string, files []string) error {
-	archiveFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer archiveFile.Close()
-
-	if err := iterateTarArchive(src, func(r *tar.Reader, header *tar.Header) error {
-		// Check if the current entry is one of the target files
-		for _, file := range files {
-			if strings.Contains(header.Name, file) {
-				// Create the destination folder
-				if err := os.MkdirAll(filepath.Join(dest, filepath.Dir(header.Name)), 0o700); err != nil {
-					return err
-				}
-				// Create the destination file
-				destFile, err := os.Create(filepath.Join(dest, header.Name))
-				if err != nil {
-					return err
-				}
-				defer destFile.Close()
-
-				// Copy the contents of the entry to the destination file
-				_, err = io.Copy(destFile, r)
-				if err != nil {
-					return err
-				}
-
-				// File successfully extracted, move to the next file
-				break
-			}
-		}
-		return nil
-	}); err != nil {
-		return fmt.Errorf("unpacking of checkpoint archive failed: %w", err)
+	// Try to extract Podman network status information
+	if err := parsePodmanNetworkStatus(path, container); err != nil {
+		// Don't return error, just log it so we don't fail the entire extraction
+		fmt.Printf("Warning: Failed to extract Podman network info: %v\n", err)
 	}
 
-	return nil
-}
-
-// isFileInArchive checks if a file or directory with the specified pattern exists in the archive.
-// It returns true if the file or directory is found, and false otherwise.
-func isFileInArchive(archiveInput, pattern string, isDir bool) (bool, error) {
-	found := false
-
-	err := iterateTarArchive(archiveInput, func(_ *tar.Reader, header *tar.Header) error {
-		// Check if the current file or directory matches the pattern and type
-		if hasPrefix(header.Name, pattern) && header.FileInfo().Mode().IsDir() == isDir {
-			found = true
-		}
-		return nil
-	})
-	return found, err
-}
-
-// iterateTarArchive reads a tar archive from the specified input file,
-// decompresses it, and iterates through each entry, invoking the provided callback function.
-func iterateTarArchive(archiveInput string, callback func(r *tar.Reader, header *tar.Header) error) error {
-	archiveFile, err := os.Open(archiveInput)
-	if err != nil {
-		return err
-	}
-	defer archiveFile.Close()
-
-	// Decompress the archive
-	stream, err := archive.DecompressStream(archiveFile)
-	if err != nil {
-		return err
-	}
-	defer stream.Close()
-
-	// Create a tar reader to read the files from the decompressed archive
-	tarReader := tar.NewReader(stream)
-
-	for {
-		header, err := tarReader.Next()
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return err
-		}
-
-		if err = callback(tarReader, header); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func getCmdline(checkpointOutputDir string, pid uint32) (cmdline string, err error) {
-	mr, err := crit.NewMemoryReader(filepath.Join(checkpointOutputDir, metadata.CheckpointDirectory), pid, pageSize)
-	if err != nil {
-		return
-	}
-
-	buffer, err := mr.GetPsArgs()
-	if err != nil {
-		return
-	}
-
-	cmdline = strings.Join(strings.Split(buffer.String(), "\x00"), " ")
 	return
-}
-
-func getPsEnvVars(checkpointOutputDir string, pid uint32) (envVars []string, err error) {
-	mr, err := crit.NewMemoryReader(filepath.Join(checkpointOutputDir, metadata.CheckpointDirectory), pid, pageSize)
-	if err != nil {
-		return
-	}
-
-	buffer, err := mr.GetPsEnvVars()
-	if err != nil {
-		return
-	}
-
-	for _, envVar := range strings.Split(buffer.String(), "\x00") {
-		if envVar != "" {
-			envVars = append(envVars, envVar)
-		}
-	}
-
-	return
-}
