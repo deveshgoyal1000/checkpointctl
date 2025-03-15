@@ -46,12 +46,30 @@ type checkpointInfo struct {
 	archiveSizes  *archiveSizes
 }
 
-func getPodmanInfo(containerConfig *metadata.ContainerConfig, _ *spec.Spec) *containerInfo {
-	return &containerInfo{
+func getPodmanInfo(containerConfig *metadata.ContainerConfig, _ *spec.Spec) (*containerInfo, error) {
+	info := &containerInfo{
 		Name:    containerConfig.Name,
 		Created: containerConfig.CreatedTime.Format(time.RFC3339),
 		Engine:  "Podman",
 	}
+	
+	// Try to read network information from network.status file if it exists
+	networkStatus, _, err := metadata.ReadContainerNetworkStatus(filepath.Dir(filepath.Dir(metadata.CheckpointDirectory)))
+	if err == nil && networkStatus != nil {
+		// Extract the first interface's first subnet IP and MAC address
+		for _, iface := range networkStatus.Podman.Interfaces {
+			if len(iface.Subnets) > 0 {
+				// Extract IP without subnet prefix
+				ipWithSubnet := iface.Subnets[0].IPNet
+				ipOnly := strings.Split(ipWithSubnet, "/")[0]
+				info.IP = ipOnly
+				info.MAC = iface.MacAddress
+				break
+			}
+		}
+	}
+	
+	return info, nil
 }
 
 func getContainerdInfo(containerConfig *metadata.ContainerConfig, specDump *spec.Spec) *containerInfo {
@@ -180,11 +198,14 @@ func ShowContainerCheckpoints(tasks []Task) error {
 
 func getContainerInfo(specDump *spec.Spec, containerConfig *metadata.ContainerConfig) (*containerInfo, error) {
 	var ci *containerInfo
+	var err error
 	switch m := specDump.Annotations["io.container.manager"]; m {
 	case "libpod":
-		ci = getPodmanInfo(containerConfig, specDump)
+		ci, err = getPodmanInfo(containerConfig, specDump)
+		if err != nil {
+			return nil, fmt.Errorf("getting Podman container checkpoint information failed: %w", err)
+		}
 	case "cri-o":
-		var err error
 		ci, err = getCRIOInfo(containerConfig, specDump)
 		if err != nil {
 			return nil, fmt.Errorf("getting container checkpoint information failed: %w", err)
