@@ -1,0 +1,42 @@
+= checkpointctl-show(1)
+:doctype: manpage
+:manmanual: checkpointctl manual
+:mansource: checkpointctl
+:man-linkstyle: pass:[blue R < >]
+
+== NAME
+checkpointctl-show - Show details about a checkpoint
+
+== SYNOPSIS
+*checkpointctl show* [checkpoint-directory]
+
+== DESCRIPTION
+Show details about a checkpoint.
+
+== OPTIONS
+No options are available for this command.
+
+== EXAMPLES
+*checkpointctl show mycontainer*
+
+== OUTPUT
+The output includes detailed information about the checkpoint:
+
+* Name
+* ID
+* Engine (cri-o, podman, docker)
+* Runtime
+* Creation time
+* Size
+* TCP Established
+* Network information
+** For CRI-O checkpoints, it displays the IP addresses, interfaces, and MAC addresses
+** For Podman checkpoints, it displays the interfaces with their IP addresses, gateways, and MAC addresses
+* Container-specific information (based on the container engine)
+* Route information (if available)
+
+== SEE ALSO
+*checkpointctl(1)*
+
+== HISTORY
+Mar 2025, Added support for Podman network information
