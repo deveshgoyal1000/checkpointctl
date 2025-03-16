@@ -55,7 +55,7 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, _ *spec.Spec) *con
 	}
 	
 	// Check if the network status file exists and parse it
-	networkPath := filepath.Join(filepath.Dir(containerConfig.ConfigPath), "network.status")
+	networkPath := filepath.Join(filepath.Dir(containerConfig.CheckpointFilePath), "network.status")
 	if _, err := os.Stat(networkPath); err == nil {
 		data, err := os.ReadFile(networkPath)
 		if err == nil {
