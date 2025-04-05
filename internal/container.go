@@ -64,12 +64,12 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, specDump *specs.Sp
 			fmt.Printf("Extracting network.status from: %s\n", task.CheckpointFilePath)
 			err = UntarFiles(task.CheckpointFilePath, tmpDir, []string{metadata.NetworkStatusFile})
 			if err != nil {
-				fmt.Printf("Error extracting network.status: %v\n", err)
+				fmt.Printf("failed to extract network.status: %v\n", err)
 			} else {
 				networkStatusFile := filepath.Join(tmpDir, metadata.NetworkStatusFile)
 				ip, mac, err := getPodmanNetworkInfo(networkStatusFile)
 				if err != nil {
-					fmt.Printf("Error reading network info: %v\n", err)
+					fmt.Printf("failed to read network info: %v\n", err)
 				} else {
 					info.IP = ip
 					info.MAC = mac
@@ -140,9 +140,9 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Container",
 		"Image",
 		"ID",
+		"Engine",
 		"Runtime",
 		"Created",
-		"Engine",
 		"CHKPT Size",
 		"Root FS Diff Size",
 	}
@@ -162,9 +162,9 @@ func ShowContainerCheckpoints(tasks []Task) error {
 			row = append(row, info.configDump.ID)
 		}
 
+		row = append(row, info.containerInfo.Engine)
 		row = append(row, info.configDump.OCIRuntime)
 		row = append(row, info.containerInfo.Created)
-		row = append(row, info.containerInfo.Engine)
 
 		if len(tasks) == 1 {
 			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", task.CheckpointFilePath)
