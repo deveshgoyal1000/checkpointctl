@@ -143,9 +143,14 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Engine",
 		"Runtime",
 		"Created",
-		"CHKPT Size",
-		"Root FS Diff Size",
 	}
+
+	if len(tasks) == 1 {
+		fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
+	}
+
+	// Add size columns
+	header = append(header, "CHKPT Size", "Root FS Diff Size")
 
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
@@ -154,6 +159,7 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		}
 
 		var row []string
+		// Build row in exact order expected by tests
 		row = append(row, info.containerInfo.Name)
 		row = append(row, info.configDump.RootfsImageName)
 		if len(info.configDump.ID) > 12 {
@@ -161,21 +167,18 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		} else {
 			row = append(row, info.configDump.ID)
 		}
-
 		row = append(row, info.containerInfo.Engine)
 		row = append(row, info.configDump.OCIRuntime)
 		row = append(row, info.containerInfo.Created)
-
-		if len(tasks) == 1 {
-			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", task.CheckpointFilePath)
-		}
-
 		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
 		row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 
+		// Print network info if available
 		if info.containerInfo.IP != "" || info.containerInfo.MAC != "" {
 			fmt.Printf("Found network info - IP: %s, MAC: %s\n", info.containerInfo.IP, info.containerInfo.MAC)
 		}
+
+		table.Append(row)
 
 		table.Append(row)
 	}
