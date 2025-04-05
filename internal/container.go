@@ -15,11 +15,11 @@ import (
 	"strings"
 	"time"
 
-	metadata "github.com/checkpoint-restore/checkpointctl/lib"
+	lib "github.com/checkpoint-restore/checkpointctl/lib"
 	"github.com/checkpoint-restore/go-criu/v7/crit"
 	"github.com/containers/storage/pkg/archive"
 	"github.com/olekukonko/tablewriter"
-	spec "github.com/opencontainers/runtime-spec/specs-go"
+	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
 var pageSize = os.Getpagesize()
@@ -41,20 +41,48 @@ type containerInfo struct {
 
 type checkpointInfo struct {
 	containerInfo *containerInfo
-	specDump      *spec.Spec
-	configDump    *metadata.ContainerConfig
+	specDump      *specs.Spec
+	configDump    *lib.ContainerConfig
 	archiveSizes  *archiveSizes
 }
 
-func getPodmanInfo(containerConfig *metadata.ContainerConfig, _ *spec.Spec) *containerInfo {
-	return &containerInfo{
+func getPodmanInfo(containerConfig *lib.ContainerConfig, specDump *specs.Spec, task Task) *containerInfo {
+	info := &containerInfo{
 		Name:    containerConfig.Name,
 		Created: containerConfig.CreatedTime.Format(time.RFC3339),
 		Engine:  "Podman",
 	}
+
+	// Try to get network information from network.status file
+	if specDump.Annotations["io.container.manager"] == "libpod" {
+		// Create temp dir for network status file
+		tmpDir, err := os.MkdirTemp("", "network-status")
+		if err == nil {
+			defer os.RemoveAll(tmpDir)
+			
+			// Extract network.status file
+			fmt.Printf("Extracting network.status from: %s\n", task.CheckpointFilePath)
+			err = UntarFiles(task.CheckpointFilePath, tmpDir, []string{lib.NetworkStatusFile})
+			if err != nil {
+				fmt.Printf("Error extracting network.status: %v\n", err)
+			} else {
+				networkStatusFile := filepath.Join(tmpDir, lib.NetworkStatusFile)
+				ip, mac, err := getPodmanNetworkInfo(networkStatusFile)
+				if err != nil {
+					fmt.Printf("Error reading network info: %v\n", err)
+				} else {
+					info.IP = ip
+					info.MAC = mac
+					fmt.Printf("Found network info - IP: %s, MAC: %s\n", ip, mac)
+				}
+			}
+		}
+	}
+
+	return info
 }
 
-func getContainerdInfo(containerConfig *metadata.ContainerConfig, specDump *spec.Spec) *containerInfo {
+func getContainerdInfo(containerConfig *lib.ContainerConfig, specDump *specs.Spec) *containerInfo {
 	return &containerInfo{
 		Name:      specDump.Annotations["io.kubernetes.cri.container-name"],
 		Created:   containerConfig.CreatedTime.Format(time.RFC3339),
@@ -64,7 +92,7 @@ func getContainerdInfo(containerConfig *metadata.ContainerConfig, specDump *spec
 	}
 }
 
-func getCRIOInfo(_ *metadata.ContainerConfig, specDump *spec.Spec) (*containerInfo, error) {
+func getCRIOInfo(_ *lib.ContainerConfig, specDump *specs.Spec) (*containerInfo, error) {
 	cm := containerMetadata{}
 	if err := json.Unmarshal([]byte(specDump.Annotations["io.kubernetes.cri-o.Metadata"]), &cm); err != nil {
 		return nil, fmt.Errorf("failed to read io.kubernetes.cri-o.Metadata: %w", err)
@@ -84,16 +112,16 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 	info := &checkpointInfo{}
 	var err error
 
-	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
+	info.configDump, _, err = lib.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
 		return nil, err
 	}
-	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
+	info.specDump, _, err = lib.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
 		return nil, err
 	}
 
-	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump)
+	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump, task)
 	if err != nil {
 		return nil, err
 	}
@@ -116,10 +144,8 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Created",
 		"Engine",
 	}
-	// Set all columns in the table header upfront when displaying more than one checkpoint
-	if len(tasks) > 1 {
-		header = append(header, "IP", "MAC", "CHKPT Size", "Root Fs Diff Size")
-	}
+	// Always include network columns in header
+	header = append(header, "IP", "MAC", "CHKPT Size", "Root Fs Diff Size")
 
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
@@ -142,30 +168,13 @@ func ShowContainerCheckpoints(tasks []Task) error {
 
 		if len(tasks) == 1 {
 			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", task.CheckpointFilePath)
-
-			if info.containerInfo.IP != "" {
-				header = append(header, "IP")
-				row = append(row, info.containerInfo.IP)
-			}
-			if info.containerInfo.MAC != "" {
-				header = append(header, "MAC")
-				row = append(row, info.containerInfo.MAC)
-			}
-
-			header = append(header, "CHKPT Size")
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-
-			// Display root fs diff size if available
-			if info.archiveSizes.rootFsDiffTarSize != 0 {
-				header = append(header, "Root Fs Diff Size")
-				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-			}
-		} else {
-			row = append(row, info.containerInfo.IP)
-			row = append(row, info.containerInfo.MAC)
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 		}
+
+		// Always include network and size information
+		row = append(row, info.containerInfo.IP)
+		row = append(row, info.containerInfo.MAC)
+		row = append(row, lib.ByteToString(info.archiveSizes.checkpointSize))
+		row = append(row, lib.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 
 		table.Append(row)
 	}
@@ -178,11 +187,11 @@ func ShowContainerCheckpoints(tasks []Task) error {
 	return nil
 }
 
-func getContainerInfo(specDump *spec.Spec, containerConfig *metadata.ContainerConfig) (*containerInfo, error) {
+func getContainerInfo(specDump *specs.Spec, containerConfig *lib.ContainerConfig, task Task) (*containerInfo, error) {
 	var ci *containerInfo
 	switch m := specDump.Annotations["io.container.manager"]; m {
 	case "libpod":
-		ci = getPodmanInfo(containerConfig, specDump)
+		ci = getPodmanInfo(containerConfig, specDump, task)
 	case "cri-o":
 		var err error
 		ci, err = getCRIOInfo(containerConfig, specDump)
@@ -213,15 +222,15 @@ func getArchiveSizes(archiveInput string) (*archiveSizes, error) {
 
 	err := iterateTarArchive(archiveInput, func(r *tar.Reader, header *tar.Header) error {
 		if header.FileInfo().Mode().IsRegular() {
-			if hasPrefix(header.Name, metadata.CheckpointDirectory) {
+			if hasPrefix(header.Name, lib.CheckpointDirectory) {
 				// Add the file size to the total checkpoint size
 				result.checkpointSize += header.Size
-				if hasPrefix(header.Name, filepath.Join(metadata.CheckpointDirectory, metadata.PagesPrefix)) {
+				if hasPrefix(header.Name, filepath.Join(lib.CheckpointDirectory, lib.PagesPrefix)) {
 					result.pagesSize += header.Size
-				} else if hasPrefix(header.Name, filepath.Join(metadata.CheckpointDirectory, metadata.AmdgpuPagesPrefix)) {
+				} else if hasPrefix(header.Name, filepath.Join(lib.CheckpointDirectory, lib.AmdgpuPagesPrefix)) {
 					result.amdgpuPagesSize += header.Size
 				}
-			} else if hasPrefix(header.Name, metadata.RootFsDiffTar) {
+			} else if hasPrefix(header.Name, lib.RootFsDiffTar) {
 				// Read the size of rootfs diff
 				result.rootFsDiffTarSize = header.Size
 			}
@@ -324,7 +333,7 @@ func iterateTarArchive(archiveInput string, callback func(r *tar.Reader, header 
 }
 
 func getCmdline(checkpointOutputDir string, pid uint32) (cmdline string, err error) {
-	mr, err := crit.NewMemoryReader(filepath.Join(checkpointOutputDir, metadata.CheckpointDirectory), pid, pageSize)
+	mr, err := crit.NewMemoryReader(filepath.Join(checkpointOutputDir, lib.CheckpointDirectory), pid, pageSize)
 	if err != nil {
 		return
 	}
@@ -339,7 +348,7 @@ func getCmdline(checkpointOutputDir string, pid uint32) (cmdline string, err err
 }
 
 func getPsEnvVars(checkpointOutputDir string, pid uint32) (envVars []string, err error) {
-	mr, err := crit.NewMemoryReader(filepath.Join(checkpointOutputDir, metadata.CheckpointDirectory), pid, pageSize)
+	mr, err := crit.NewMemoryReader(filepath.Join(checkpointOutputDir, lib.CheckpointDirectory), pid, pageSize)
 	if err != nil {
 		return
 	}
