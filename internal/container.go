@@ -115,16 +115,16 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s: no such file or directory", filepath.Base(task.OutputDir))
+			return nil, fmt.Errorf("config.dump: no such file or directory")
 		}
-		return nil, fmt.Errorf("%s: unexpected end of JSON input", filepath.Base(task.OutputDir))
+		return nil, fmt.Errorf("config.dump: unexpected end of JSON input")
 	}
 	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%s: no such file or directory", filepath.Base(task.OutputDir))
+			return nil, fmt.Errorf("spec.dump: no such file or directory")
 		}
-		return nil, fmt.Errorf("%s: unexpected end of JSON input", filepath.Base(task.OutputDir))
+		return nil, fmt.Errorf("spec.dump: unexpected end of JSON input")
 	}
 
 	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump, task)
@@ -148,13 +148,13 @@ func ShowContainerCheckpoints(tasks []Task) error {
 
 	header := []string{
 		"Container",
-		"Image",
+		"Root FS Diff Size",
 		"ID",
 		"Engine",
 		"Runtime",
 		"Created",
 		"CHKPT Size",
-		"Root FS Diff Size",
+		"Image",
 	}
 
 	for _, task := range tasks {
@@ -166,7 +166,7 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		var row []string
 		// Build row in exact order expected by tests
 		row = append(row, info.containerInfo.Name)
-		row = append(row, info.configDump.RootfsImageName)
+		row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 		if len(info.configDump.ID) > 12 {
 			row = append(row, info.configDump.ID[:12])
 		} else {
@@ -176,14 +176,12 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		row = append(row, info.configDump.OCIRuntime)
 		row = append(row, info.containerInfo.Created)
 		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-		row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+		row = append(row, info.configDump.RootfsImageName)
 
 		// Print network info if available
 		if info.containerInfo.IP != "" || info.containerInfo.MAC != "" {
 			fmt.Printf("Found network info - IP: %s, MAC: %s\n", info.containerInfo.IP, info.containerInfo.MAC)
 		}
-
-		table.Append(row)
 
 		table.Append(row)
 	}
