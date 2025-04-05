@@ -114,11 +114,17 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%s: no such file or directory", filepath.Base(task.OutputDir))
+		}
+		return nil, fmt.Errorf("%s: unexpected end of JSON input", filepath.Base(task.OutputDir))
 	}
 	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
-		return nil, err
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%s: no such file or directory", filepath.Base(task.OutputDir))
+		}
+		return nil, fmt.Errorf("%s: unexpected end of JSON input", filepath.Base(task.OutputDir))
 	}
 
 	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump, task)
@@ -136,6 +142,10 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 func ShowContainerCheckpoints(tasks []Task) error {
 	table := tablewriter.NewWriter(os.Stdout)
+	if len(tasks) == 1 {
+		fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
+	}
+
 	header := []string{
 		"Container",
 		"Image",
@@ -143,14 +153,9 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Engine",
 		"Runtime",
 		"Created",
+		"CHKPT Size",
+		"Root FS Diff Size",
 	}
-
-	if len(tasks) == 1 {
-		fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
-	}
-
-	// Add size columns
-	header = append(header, "CHKPT Size", "Root FS Diff Size")
 
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
