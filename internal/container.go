@@ -112,11 +112,11 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 	info := &checkpointInfo{}
 	var err error
 
-	info.configDump, _, err = lib.ReadContainerCheckpointConfigDump(task.OutputDir)
+	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
 		return nil, err
 	}
-	info.specDump, _, err = lib.ReadContainerCheckpointSpecDump(task.OutputDir)
+	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
 		return nil, err
 	}
