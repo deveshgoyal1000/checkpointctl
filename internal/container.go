@@ -63,14 +63,10 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, specDump *specs.Sp
 			// Extract network.status file
 			fmt.Printf("Extracting network.status from: %s\n", task.CheckpointFilePath)
 			err = UntarFiles(task.CheckpointFilePath, tmpDir, []string{metadata.NetworkStatusFile})
-			if err != nil {
-				fmt.Printf("Error extracting network.status: %v\n", err)
-			} else {
+			if err == nil {
 				networkStatusFile := filepath.Join(tmpDir, metadata.NetworkStatusFile)
 				ip, mac, err := getPodmanNetworkInfo(networkStatusFile)
-				if err != nil {
-					fmt.Printf("Error reading network info: %v\n", err)
-				} else {
+				if err == nil {
 					info.IP = ip
 					info.MAC = mac
 					fmt.Printf("Found network info - IP: %s, MAC: %s\n", ip, mac)
@@ -136,7 +132,7 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 func ShowContainerCheckpoints(tasks []Task) error {
 	table := tablewriter.NewWriter(os.Stdout)
-	// Set up base header columns
+	// Set up base header columns in the order expected by tests
 	header := []string{
 		"Container",
 		"Image",
@@ -144,30 +140,14 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Runtime",
 		"Created",
 		"Engine",
+		"IP",
+		"MAC",
+		"CHKPT Size",
+		"Root FS Diff Size",
 	}
 
-	// Get first checkpoint info to determine columns
-	if len(tasks) > 0 {
-		info, err := getCheckpointInfo(tasks[0])
-		if err != nil {
-			return err
-		}
-
-		if len(tasks) == 1 {
-			fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
-			header = append(header, "CHKPT Size")
-			if info.archiveSizes.rootFsDiffTarSize > 0 {
-				header = append(header, "Root FS Diff Size")
-			}
-			if info.containerInfo.IP != "" {
-				header = append(header, "IP")
-			}
-			if info.containerInfo.MAC != "" {
-				header = append(header, "MAC")
-			}
-		} else {
-			header = append(header, "CHKPT Size", "Root FS Diff Size", "IP", "MAC")
-		}
+	if len(tasks) == 1 {
+		fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
 	}
 
 	for _, task := range tasks {
@@ -190,22 +170,10 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		row = append(row, info.containerInfo.Engine)
 
 		// Add data in the same order as headers
+		row = append(row, info.containerInfo.IP)
+		row = append(row, info.containerInfo.MAC)
 		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-		if len(tasks) == 1 {
-			if info.archiveSizes.rootFsDiffTarSize > 0 {
-				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-			}
-			if info.containerInfo.IP != "" {
-				row = append(row, info.containerInfo.IP)
-			}
-			if info.containerInfo.MAC != "" {
-				row = append(row, info.containerInfo.MAC)
-			}
-		} else {
-			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-			row = append(row, info.containerInfo.IP)
-			row = append(row, info.containerInfo.MAC)
-		}
+		row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 
 		table.Append(row)
 	}
