@@ -110,11 +110,11 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("config.dump: %w", err)
 	}
 	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("spec.dump: %w", err)
 	}
 
 	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump, task)
@@ -132,7 +132,6 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 func ShowContainerCheckpoints(tasks []Task) error {
 	table := tablewriter.NewWriter(os.Stdout)
-	// Set up base header columns in the order expected by tests
 	header := []string{
 		"Container",
 		"Image",
@@ -140,22 +139,39 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Runtime",
 		"Created",
 		"Engine",
-		"IP",
-		"MAC",
-		"CHKPT Size",
-		"Root FS Diff Size",
 	}
 
-	if len(tasks) == 1 {
-		fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
+	// Get first checkpoint info to determine columns
+	if len(tasks) > 0 {
+		info, err := getCheckpointInfo(tasks[0])
+		if err != nil {
+			return fmt.Errorf("failed to get checkpoint info: %v", err)
+		}
+
+		if len(tasks) == 1 {
+			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
+			if info.containerInfo.IP != "" {
+				header = append(header, "IP")
+			}
+			if info.containerInfo.MAC != "" {
+				header = append(header, "MAC")
+			}
+			header = append(header, "CHKPT Size")
+			if info.archiveSizes.rootFsDiffTarSize > 0 {
+				header = append(header, "Root FS Diff Size")
+			}
+		} else {
+			header = append(header, "IP", "MAC", "CHKPT Size", "Root FS Diff Size")
+		}
 	}
 
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
 		if err != nil {
-			return err
+			return fmt.Errorf("failed to get checkpoint info: %v", err)
 		}
 
+		// Build row data in the same order as headers
 		var row []string
 		row = append(row, info.containerInfo.Name)
 		row = append(row, info.configDump.RootfsImageName)
@@ -164,16 +180,27 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		} else {
 			row = append(row, info.configDump.ID)
 		}
-
 		row = append(row, info.configDump.OCIRuntime)
 		row = append(row, info.containerInfo.Created)
 		row = append(row, info.containerInfo.Engine)
 
-		// Add data in the same order as headers
-		row = append(row, info.containerInfo.IP)
-		row = append(row, info.containerInfo.MAC)
-		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-		row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+		if len(tasks) == 1 {
+			if info.containerInfo.IP != "" {
+				row = append(row, info.containerInfo.IP)
+			}
+			if info.containerInfo.MAC != "" {
+				row = append(row, info.containerInfo.MAC)
+			}
+			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
+			if info.archiveSizes.rootFsDiffTarSize > 0 {
+				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+			}
+		} else {
+			row = append(row, info.containerInfo.IP)
+			row = append(row, info.containerInfo.MAC)
+			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
+			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+		}
 
 		table.Append(row)
 	}
@@ -247,25 +274,25 @@ func UntarFiles(src, dest string, files []string) error {
 	}
 	defer archiveFile.Close()
 
-	if err := iterateTarArchive(src, func(r *tar.Reader, header *tar.Header) error {
+	err = iterateTarArchive(src, func(r *tar.Reader, header *tar.Header) error {
 		// Check if the current entry is one of the target files
 		for _, file := range files {
 			if strings.Contains(header.Name, file) {
 				// Create the destination folder
 				if err := os.MkdirAll(filepath.Join(dest, filepath.Dir(header.Name)), 0o700); err != nil {
-					return err
+					return fmt.Errorf("failed to create directory: %w", err)
 				}
 				// Create the destination file
 				destFile, err := os.Create(filepath.Join(dest, header.Name))
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to create file: %w", err)
 				}
 				defer destFile.Close()
 
 				// Copy the contents of the entry to the destination file
 				_, err = io.Copy(destFile, r)
 				if err != nil {
-					return err
+					return fmt.Errorf("failed to copy file contents: %w", err)
 				}
 
 				// File successfully extracted, move to the next file
@@ -273,8 +300,9 @@ func UntarFiles(src, dest string, files []string) error {
 			}
 		}
 		return nil
-	}); err != nil {
-		return fmt.Errorf("unpacking of checkpoint archive failed: %w", err)
+	})
+	if err != nil {
+		return fmt.Errorf("Error: %v", err)
 	}
 
 	return nil
