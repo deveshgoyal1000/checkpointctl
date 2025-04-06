@@ -138,10 +138,6 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 }
 
 func ShowContainerCheckpoints(tasks []Task) error {
-	if len(tasks) == 1 {
-		fmt.Printf("Displaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
-	}
-
 	table := tablewriter.NewWriter(os.Stdout)
 	header := []string{
 		"Container",
@@ -159,7 +155,14 @@ func ShowContainerCheckpoints(tasks []Task) error {
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
 		if err != nil {
+			if strings.Contains(err.Error(), "Error: ") {
+				return fmt.Errorf("%s", strings.TrimPrefix(err.Error(), "Error: "))
+			}
 			return err
+		}
+
+		if len(tasks) == 1 {
+			fmt.Printf("Displaying container checkpoint data from %s\n", task.CheckpointFilePath)
 		}
 
 		var row []string
