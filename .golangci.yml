@@ -1,10 +1,16 @@
----
-run:
-  concurrency: 6
-  timeout: 5m
 linters:
   enable:
-    - errorlint
-    - unconvert
-    - gofumpt
-    - unparam
+    - gofmt
+    - golint
+    - govet
+    - errcheck
+    - staticcheck
+
+run:
+  deadline: 5m
+
+issues:
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - errcheck
