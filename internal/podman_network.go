@@ -6,7 +6,7 @@ import (
 	"os"
 )
 
-// PodmanNetworkStatus represents the network status structure for Podman
+// PodmanNetworkStatus represents the network status structure for Podman.
 type PodmanNetworkStatus struct {
 	Podman struct {
 		Interfaces map[string]struct {
@@ -19,7 +19,7 @@ type PodmanNetworkStatus struct {
 	} `json:"podman"`
 }
 
-// getPodmanNetworkInfo reads and parses the network.status file from a Podman checkpoint
+// getPodmanNetworkInfo reads and parses the network.status file from a Podman checkpoint.
 func getPodmanNetworkInfo(networkStatusFile string) (string, string, error) {
 	data, err := os.ReadFile(networkStatusFile)
 	if err != nil {

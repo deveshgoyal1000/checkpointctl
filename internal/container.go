@@ -1,7 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
-
-// This file is used to handle container checkpoint archives
-
 package internal
 
 import (
@@ -59,7 +55,7 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, specDump *specs.Sp
 		tmpDir, err := os.MkdirTemp("", "network-status")
 		if err == nil {
 			defer os.RemoveAll(tmpDir)
-			
+
 			// Extract network.status file
 			err = UntarFiles(task.CheckpointFilePath, tmpDir, []string{metadata.NetworkStatusFile})
 			if err == nil {
@@ -113,6 +109,7 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 		}
 		return nil, fmt.Errorf("config.dump: %w", err)
 	}
+
 	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
 		if os.IsNotExist(err) {
