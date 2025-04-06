@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	metadata "github.com/checkpoint-restore/checkpointctl/lib"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
@@ -16,9 +17,15 @@ func TestGetPodmanInfo(t *testing.T) {
 			"io.container.manager": "libpod",
 		},
 	}
+	
+	createdTime, err := time.Parse(time.RFC3339, "2025-04-06T12:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to parse time: %v", err)
+	}
+
 	containerConfig := &metadata.ContainerConfig{
 		Name:        "test-container",
-		CreatedTime: "2025-04-06T12:00:00Z",
+		CreatedTime: createdTime,
 	}
 
 	// Create test network.status file
@@ -78,10 +85,17 @@ func TestGetContainerInfo(t *testing.T) {
 			"io.container.manager": "libpod",
 		},
 	}
+
+	createdTime, err := time.Parse(time.RFC3339, "2025-04-06T12:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to parse time: %v", err)
+	}
+
 	containerConfig := &metadata.ContainerConfig{
 		Name:        "test-container",
-		CreatedTime: "2025-04-06T12:00:00Z",
+		CreatedTime: createdTime,
 	}
+
 	task := Task{
 		OutputDir:          t.TempDir(),
 		CheckpointFilePath: "test.tar",

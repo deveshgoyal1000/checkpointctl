@@ -1,9 +1,11 @@
 package internal
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	metadata "github.com/checkpoint-restore/checkpointctl/lib"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
@@ -19,20 +21,26 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 			"io.container.manager": "libpod",
 		},
 	}
+
+	createdTime, err := time.Parse(time.RFC3339, "2025-04-06T12:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to parse time: %v", err)
+	}
+
 	containerConfig := &metadata.ContainerConfig{
 		Name:        "test-container",
-		CreatedTime: "2025-04-06T12:00:00Z",
+		CreatedTime: createdTime,
 	}
 
 	// Write spec.dump
 	specFile := filepath.Join(tmpDir, "spec.dump")
-	if err := metadata.WriteJSONFile(specFile, specDump); err != nil {
+	if err := metadata.WriteJSONFile(specDump, specFile, "spec.dump"); err != nil {
 		t.Fatalf("Failed to write spec.dump: %v", err)
 	}
 
 	// Write config.dump
 	configFile := filepath.Join(tmpDir, "config.dump")
-	if err := metadata.WriteJSONFile(configFile, containerConfig); err != nil {
+	if err := metadata.WriteJSONFile(containerConfig, configFile, "config.dump"); err != nil {
 		t.Fatalf("Failed to write config.dump: %v", err)
 	}
 
@@ -110,7 +118,8 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 	ib := NewImageBuilder(archivePath, "test-image:latest")
 
 	// Test CreateImageFromCheckpoint
-	err := ib.CreateImageFromCheckpoint()
+	ctx := context.Background()
+	err := ib.CreateImageFromCheckpoint(ctx)
 	// Since we can't actually run buildah commands in tests,
 	// we expect an error about missing buildah
 	if err == nil {
