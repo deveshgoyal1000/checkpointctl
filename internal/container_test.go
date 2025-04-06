@@ -23,12 +23,12 @@ func TestGetPodmanInfo(t *testing.T) {
 	configData := &metadata.ContainerConfig{
 		ID:          "test-container-id",
 		Name:        "test-container",
-		Image:       "nginx:latest",
+		RootfsImageName: "nginx:latest",
 		CreatedTime: time.Now(),
 	}
 
 	configPath := filepath.Join(tmpDir, "config.dump")
-	if err := metadata.WriteJSONFile(configPath, configData); err != nil {
+	if err := metadata.WriteJSONFile(configData, configPath, "config.dump"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,7 +39,7 @@ func TestGetPodmanInfo(t *testing.T) {
 		},
 	}
 	specPath := filepath.Join(tmpDir, "spec.dump")
-	if err := metadata.WriteJSONFile(specPath, specData); err != nil {
+	if err := metadata.WriteJSONFile(specData, specPath, "spec.dump"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -70,7 +70,7 @@ func TestGetContainerdInfo(t *testing.T) {
 	configData := &metadata.ContainerConfig{
 		ID:          "test-container-id",
 		Name:        "test-container",
-		Image:       "nginx:latest",
+		RootfsImageName: "nginx:latest",
 		CreatedTime: time.Now(),
 	}
 
@@ -111,10 +111,10 @@ func TestGetCheckpointInfo(t *testing.T) {
 	configData := &metadata.ContainerConfig{
 		ID:          "test-container-id",
 		Name:        "test-container",
-		Image:       "nginx:latest",
+		RootfsImageName: "nginx:latest",
 		CreatedTime: time.Now(),
 	}
-	if err := metadata.WriteJSONFile(filepath.Join(tmpDir, "config.dump"), configData); err != nil {
+	if err := metadata.WriteJSONFile(configData, filepath.Join(tmpDir, "config.dump"), "config.dump"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func TestGetCheckpointInfo(t *testing.T) {
 			"io.container.manager": "libpod",
 		},
 	}
-	if err := metadata.WriteJSONFile(filepath.Join(tmpDir, "spec.dump"), specData); err != nil {
+	if err := metadata.WriteJSONFile(specData, filepath.Join(tmpDir, "spec.dump"), "spec.dump"); err != nil {
 		t.Fatal(err)
 	}
 
