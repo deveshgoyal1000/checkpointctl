@@ -21,7 +21,7 @@ func (m *mockImageBuilder) runCommand(args ...string) error {
 }
 
 func TestNewImageBuilder(t *testing.T) {
-	builder := NewImageBuilder()
+	builder := NewImageBuilder("buildah", "/tmp")
 	if builder == nil {
 		t.Error("Expected non-nil ImageBuilder")
 	}
@@ -58,11 +58,10 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 
 	// Create test config.dump
 	configData := &metadata.ContainerConfig{
-		ID:             "test-container-id",
-		Name:           "test-container",
+		ID:              "test-container-id",
+		Name:            "test-container",
 		RootfsImageName: "nginx:latest",
-		CreatedTime:    time.Now(),
-		Labels:         map[string]string{"test": "value"},
+		CreatedTime:     time.Now(),
 	}
 
 	configPath := filepath.Join(checkpointDir, "config.dump")
@@ -101,9 +100,9 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 				OutputDir:         checkpointDir,
 			}
 
-			err := CreateImageFromCheckpoint(mock, task, tt.targetImage)
+			err := BuildImageFromCheckpoint(mock, task, tt.targetImage)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("CreateImageFromCheckpoint() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("BuildImageFromCheckpoint() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 
@@ -182,15 +181,15 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 			task := Task{
 				OutputDir: tt.dir,
 			}
-			got, err := getCheckpointAnnotations(task)
+			got, err := GetCheckpointAnnotations(task)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("getCheckpointAnnotations() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("GetCheckpointAnnotations() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if !tt.wantErr {
 				for k, v := range tt.want {
 					if got[k] != v {
-						t.Errorf("getCheckpointAnnotations() = %v, want %v", got[k], v)
+						t.Errorf("GetCheckpointAnnotations() = %v, want %v", got[k], v)
 					}
 				}
 			}
