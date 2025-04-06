@@ -145,9 +145,20 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Engine",
 	}
 
-	// Set all columns in the table header upfront when displaying more than one checkpoint
-	if len(tasks) > 1 {
-		header = append(header, "IP", "MAC", "CHKPT Size", "Root FS Diff Size")
+	if len(tasks) == 1 {
+		fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
+		header = append(header, "CHKPT Size")
+		if info.archiveSizes.rootFsDiffTarSize > 0 {
+			header = append(header, "Root FS Diff Size")
+		}
+		if info.containerInfo.IP != "" {
+			header = append(header, "IP")
+		}
+		if info.containerInfo.MAC != "" {
+			header = append(header, "MAC")
+		}
+	} else {
+		header = append(header, "CHKPT Size", "Root FS Diff Size", "IP", "MAC")
 	}
 
 	for _, task := range tasks {
@@ -170,34 +181,21 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		row = append(row, info.containerInfo.Engine)
 
 		if len(tasks) == 1 {
-			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", task.CheckpointFilePath)
-		}
-
-		if len(tasks) == 1 {
-			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", task.CheckpointFilePath)
-
+			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
+			if info.archiveSizes.rootFsDiffTarSize > 0 {
+				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+			}
 			if info.containerInfo.IP != "" {
-				header = append(header, "IP")
 				row = append(row, info.containerInfo.IP)
 			}
 			if info.containerInfo.MAC != "" {
-				header = append(header, "MAC")
 				row = append(row, info.containerInfo.MAC)
 			}
-
-			header = append(header, "CHKPT Size")
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-
-			// Display root fs diff size if available
-			if info.archiveSizes.rootFsDiffTarSize != 0 {
-				header = append(header, "Root FS Diff Size")
-				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-			}
 		} else {
-			row = append(row, info.containerInfo.IP)
-			row = append(row, info.containerInfo.MAC)
 			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
 			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
+			row = append(row, info.containerInfo.IP)
+			row = append(row, info.containerInfo.MAC)
 		}
 
 		table.Append(row)
