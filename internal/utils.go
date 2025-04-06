@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// FormatTime formats microseconds into a human-readable string.
 func FormatTime(microseconds uint32) string {
 	if microseconds < 1000 {
 		return fmt.Sprintf("%d µs", microseconds)

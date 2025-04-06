@@ -21,14 +21,14 @@ func TestGetPodmanInfo(t *testing.T) {
 
 	// Create test config.dump
 	configData := &metadata.ContainerConfig{
-		ID:          "test-container-id",
-		Name:        "test-container",
+		ID:             "test-container-id",
+		Name:           "test-container",
 		RootfsImageName: "nginx:latest",
-		CreatedTime: time.Now(),
+		CreatedTime:    time.Now(),
 	}
 
 	configPath := filepath.Join(tmpDir, "config.dump")
-	if err := metadata.WriteJSONFile(configData, configPath, "config.dump"); err != nil {
+	if _, err := metadata.WriteJSONFile(configData, configPath, "config.dump"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -39,7 +39,7 @@ func TestGetPodmanInfo(t *testing.T) {
 		},
 	}
 	specPath := filepath.Join(tmpDir, "spec.dump")
-	if err := metadata.WriteJSONFile(specData, specPath, "spec.dump"); err != nil {
+	if _, err := metadata.WriteJSONFile(specData, specPath, "spec.dump"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -68,10 +68,10 @@ func TestGetPodmanInfo(t *testing.T) {
 func TestGetContainerdInfo(t *testing.T) {
 	// Create test data
 	configData := &metadata.ContainerConfig{
-		ID:          "test-container-id",
-		Name:        "test-container",
+		ID:             "test-container-id",
+		Name:           "test-container",
 		RootfsImageName: "nginx:latest",
-		CreatedTime: time.Now(),
+		CreatedTime:    time.Now(),
 	}
 
 	specData := &specs.Spec{
@@ -109,12 +109,12 @@ func TestGetCheckpointInfo(t *testing.T) {
 
 	// Create test files
 	configData := &metadata.ContainerConfig{
-		ID:          "test-container-id",
-		Name:        "test-container",
+		ID:             "test-container-id",
+		Name:           "test-container",
 		RootfsImageName: "nginx:latest",
-		CreatedTime: time.Now(),
+		CreatedTime:    time.Now(),
 	}
-	if err := metadata.WriteJSONFile(configData, filepath.Join(tmpDir, "config.dump"), "config.dump"); err != nil {
+	if _, err := metadata.WriteJSONFile(configData, filepath.Join(tmpDir, "config.dump"), "config.dump"); err != nil {
 		t.Fatal(err)
 	}
 
@@ -123,7 +123,7 @@ func TestGetCheckpointInfo(t *testing.T) {
 			"io.container.manager": "libpod",
 		},
 	}
-	if err := metadata.WriteJSONFile(specData, filepath.Join(tmpDir, "spec.dump"), "spec.dump"); err != nil {
+	if _, err := metadata.WriteJSONFile(specData, filepath.Join(tmpDir, "spec.dump"), "spec.dump"); err != nil {
 		t.Fatal(err)
 	}
 
