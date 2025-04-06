@@ -2,6 +2,7 @@ package internal
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -34,13 +35,21 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 
 	// Write spec.dump
 	specFile := filepath.Join(tmpDir, "spec.dump")
-	if _, err := metadata.WriteJSONFile(specDump, specFile, "spec.dump"); err != nil {
+	specData, err := json.Marshal(specDump)
+	if err != nil {
+		t.Fatalf("Failed to marshal spec.dump: %v", err)
+	}
+	if err := os.WriteFile(specFile, specData, 0644); err != nil {
 		t.Fatalf("Failed to write spec.dump: %v", err)
 	}
 
 	// Write config.dump
 	configFile := filepath.Join(tmpDir, "config.dump")
-	if _, err := metadata.WriteJSONFile(containerConfig, configFile, "config.dump"); err != nil {
+	configData, err := json.Marshal(containerConfig)
+	if err != nil {
+		t.Fatalf("Failed to marshal config.dump: %v", err)
+	}
+	if err := os.WriteFile(configFile, configData, 0644); err != nil {
 		t.Fatalf("Failed to write config.dump: %v", err)
 	}
 

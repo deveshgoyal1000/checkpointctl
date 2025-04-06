@@ -1,7 +1,10 @@
 package internal
 
 import (
+	"archive/tar"
+	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,10 +14,41 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-func setupNetworkTest(t *testing.T) (string, string) {
-	tmpDir := t.TempDir()
+func createTestArchive(t *testing.T, networkStatus string) string {
+	// Create a buffer to write our archive to
+	buf := new(bytes.Buffer)
 
-	// Create network.status file
+	// Create a new tar archive
+	tw := tar.NewWriter(buf)
+
+	// Add network.status file to the archive
+	hdr := &tar.Header{
+		Name: metadata.NetworkStatusFile,
+		Mode: 0644,
+		Size: int64(len(networkStatus)),
+	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		t.Fatalf("Failed to write header: %v", err)
+	}
+	if _, err := tw.Write([]byte(networkStatus)); err != nil {
+		t.Fatalf("Failed to write content: %v", err)
+	}
+
+	// Close the tar writer
+	if err := tw.Close(); err != nil {
+		t.Fatalf("Failed to close tar writer: %v", err)
+	}
+
+	// Write the archive to a file
+	archivePath := filepath.Join(t.TempDir(), "checkpoint.tar")
+	if err := os.WriteFile(archivePath, buf.Bytes(), 0644); err != nil {
+		t.Fatalf("Failed to write archive: %v", err)
+	}
+
+	return archivePath
+}
+
+func TestGetPodmanInfo(t *testing.T) {
 	networkStatus := `{
 		"podman": {
 			"interfaces": {
@@ -28,22 +62,9 @@ func setupNetworkTest(t *testing.T) (string, string) {
 			}
 		}
 	}`
-	networkStatusFile := filepath.Join(tmpDir, metadata.NetworkStatusFile)
-	if err := os.WriteFile(networkStatusFile, []byte(networkStatus), 0644); err != nil {
-		t.Fatalf("Failed to write network.status: %v", err)
-	}
 
-	// Create checkpoint archive with network.status
-	archivePath := filepath.Join(tmpDir, "checkpoint.tar")
-	if err := os.WriteFile(archivePath, []byte(networkStatus), 0644); err != nil {
-		t.Fatalf("Failed to write archive: %v", err)
-	}
-
-	return tmpDir, archivePath
-}
-
-func TestGetPodmanInfo(t *testing.T) {
-	tmpDir, archivePath := setupNetworkTest(t)
+	tmpDir := t.TempDir()
+	archivePath := createTestArchive(t, networkStatus)
 
 	specDump := &specs.Spec{
 		Annotations: map[string]string{
@@ -101,7 +122,22 @@ type crioMetadata struct {
 }
 
 func TestGetContainerInfo(t *testing.T) {
-	tmpDir, archivePath := setupNetworkTest(t)
+	networkStatus := `{
+		"podman": {
+			"interfaces": {
+				"eth0": {
+					"subnets": [{
+						"ipnet": "10.88.0.9/16",
+						"gateway": "10.88.0.1"
+					}],
+					"mac_address": "f2:99:8d:fb:5a:57"
+				}
+			}
+		}
+	}`
+
+	tmpDir := t.TempDir()
+	archivePath := createTestArchive(t, networkStatus)
 
 	// Test case 1: Podman container
 	specDump := &specs.Spec{
