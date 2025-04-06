@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,25 +11,10 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
-func TestGetPodmanInfo(t *testing.T) {
-	// Test case 1: Valid network info
-	specDump := &specs.Spec{
-		Annotations: map[string]string{
-			"io.container.manager": "libpod",
-		},
-	}
-	
-	createdTime, err := time.Parse(time.RFC3339, "2025-04-06T12:00:00Z")
-	if err != nil {
-		t.Fatalf("Failed to parse time: %v", err)
-	}
+func setupNetworkTest(t *testing.T) (string, string) {
+	tmpDir := t.TempDir()
 
-	containerConfig := &metadata.ContainerConfig{
-		Name:        "test-container",
-		CreatedTime: createdTime,
-	}
-
-	// Create test network.status file
+	// Create network.status file
 	networkStatus := `{
 		"podman": {
 			"interfaces": {
@@ -42,16 +28,42 @@ func TestGetPodmanInfo(t *testing.T) {
 			}
 		}
 	}`
-
-	tmpDir := t.TempDir()
 	networkStatusFile := filepath.Join(tmpDir, metadata.NetworkStatusFile)
 	if err := os.WriteFile(networkStatusFile, []byte(networkStatus), 0644); err != nil {
-		t.Fatalf("Failed to write test file: %v", err)
+		t.Fatalf("Failed to write network.status: %v", err)
+	}
+
+	// Create checkpoint archive
+	archivePath := filepath.Join(tmpDir, "checkpoint.tar")
+	if err := os.WriteFile(archivePath, []byte("test data"), 0644); err != nil {
+		t.Fatalf("Failed to write archive: %v", err)
+	}
+
+	return tmpDir, archivePath
+}
+
+func TestGetPodmanInfo(t *testing.T) {
+	tmpDir, archivePath := setupNetworkTest(t)
+
+	specDump := &specs.Spec{
+		Annotations: map[string]string{
+			"io.container.manager": "libpod",
+		},
+	}
+
+	createdTime, err := time.Parse(time.RFC3339, "2025-04-06T12:00:00Z")
+	if err != nil {
+		t.Fatalf("Failed to parse time: %v", err)
+	}
+
+	containerConfig := &metadata.ContainerConfig{
+		Name:        "test-container",
+		CreatedTime: createdTime,
 	}
 
 	task := Task{
 		OutputDir:          tmpDir,
-		CheckpointFilePath: "test.tar",
+		CheckpointFilePath: archivePath,
 	}
 
 	info := getPodmanInfo(containerConfig, specDump, task)
@@ -78,7 +90,14 @@ func TestGetPodmanInfo(t *testing.T) {
 	}
 }
 
+type crioMetadata struct {
+	Name    string    `json:"name"`
+	Created time.Time `json:"created"`
+}
+
 func TestGetContainerInfo(t *testing.T) {
+	tmpDir, archivePath := setupNetworkTest(t)
+
 	// Test case 1: Podman container
 	specDump := &specs.Spec{
 		Annotations: map[string]string{
@@ -97,8 +116,8 @@ func TestGetContainerInfo(t *testing.T) {
 	}
 
 	task := Task{
-		OutputDir:          t.TempDir(),
-		CheckpointFilePath: "test.tar",
+		OutputDir:          tmpDir,
+		CheckpointFilePath: archivePath,
 	}
 
 	info, err := getContainerInfo(specDump, containerConfig, task)
@@ -113,11 +132,19 @@ func TestGetContainerInfo(t *testing.T) {
 	}
 
 	// Test case 2: CRI-O container
+	metadata := crioMetadata{
+		Name:    "test-crio",
+		Created: createdTime,
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		t.Fatalf("Failed to marshal metadata: %v", err)
+	}
+
 	specDumpCrio := &specs.Spec{
 		Annotations: map[string]string{
 			"io.container.manager":        "cri-o",
-			"io.kubernetes.cri-o.Name":    "test-crio",
-			"io.kubernetes.cri-o.Created": "2025-04-06T12:00:00Z",
+			"io.kubernetes.cri-o.Metadata": string(metadataJSON),
 		},
 	}
 
@@ -127,6 +154,9 @@ func TestGetContainerInfo(t *testing.T) {
 	}
 	if infoCrio.Engine != "CRI-O" {
 		t.Errorf("Expected engine %s, got %s", "CRI-O", infoCrio.Engine)
+	}
+	if infoCrio.Name != "test-crio" {
+		t.Errorf("Expected name %s, got %s", "test-crio", infoCrio.Name)
 	}
 
 	// Test case 3: Unknown container type
