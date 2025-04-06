@@ -4,7 +4,6 @@ import (
 	"archive/tar"
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
