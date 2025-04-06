@@ -4,6 +4,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/checkpoint-restore/checkpointctl/lib/metadata"
+	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
 type mockImageBuilder struct {
@@ -38,16 +41,30 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 	}
 
 	// Create test spec.dump with annotations
-	specData := map[string]interface{}{
-		"annotations": map[string]string{
-			"io.containerd.image.name": "docker.io/library/nginx:latest",
-			"io.kubernetes.cri.sandbox-name": "test-pod",
-			"io.kubernetes.cri.sandbox-id": "test-pod-id",
+	specData := &specs.Spec{
+		Annotations: map[string]string{
+			"io.containerd.image.name":         "docker.io/library/nginx:latest",
+			"io.kubernetes.cri.sandbox-name":   "test-pod",
+			"io.kubernetes.cri.sandbox-id":     "test-pod-id",
+			"io.kubernetes.cri.container-type": "container",
 		},
 	}
 
 	specPath := filepath.Join(checkpointDir, "spec.dump")
-	if err := lib.WriteJSONFile(specPath, specData); err != nil {
+	if err := metadata.WriteJSONFile(specPath, specData); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create test config.dump
+	configData := &metadata.ContainerConfig{
+		ID:     "test-container-id",
+		Name:   "test-container",
+		Image:  "nginx:latest",
+		Labels: map[string]string{"test": "value"},
+	}
+
+	configPath := filepath.Join(checkpointDir, "config.dump")
+	if err := metadata.WriteJSONFile(configPath, configData); err != nil {
 		t.Fatal(err)
 	}
 
@@ -77,7 +94,11 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 				err: tt.mockErr,
 			}
 
-			err := CreateImageFromCheckpoint(mock, checkpointDir, tt.targetImage)
+			task := &Task{
+				Dir: checkpointDir,
+			}
+
+			err := CreateImageFromCheckpoint(mock, task, tt.targetImage)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateImageFromCheckpoint() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -118,15 +139,15 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create test spec.dump with annotations
-	specData := map[string]interface{}{
-		"annotations": map[string]string{
+	specData := &specs.Spec{
+		Annotations: map[string]string{
 			"test.annotation.1": "value1",
 			"test.annotation.2": "value2",
 		},
 	}
 
 	specPath := filepath.Join(tmpDir, "spec.dump")
-	if err := lib.WriteJSONFile(specPath, specData); err != nil {
+	if err := metadata.WriteJSONFile(specPath, specData); err != nil {
 		t.Fatal(err)
 	}
 
@@ -155,7 +176,10 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := getCheckpointAnnotations(tt.dir)
+			task := &Task{
+				Dir: tt.dir,
+			}
+			got, err := getCheckpointAnnotations(task)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("getCheckpointAnnotations() error = %v, wantErr %v", err, tt.wantErr)
 				return

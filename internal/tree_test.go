@@ -2,33 +2,52 @@ package internal
 
 import (
 	"testing"
+
+	"github.com/checkpoint-restore/checkpointctl/lib/metadata"
+	"github.com/opencontainers/runtime-spec/specs-go"
 )
+
+// TreeNode represents a node in the tree view
+type TreeNode struct {
+	Text     string
+	Nodes    []*TreeNode
+	Selected bool
+}
 
 func TestRenderTreeView(t *testing.T) {
 	tests := []struct {
 		name        string
-		checkpoint  ContainerCheckpoint
+		checkpoint  *checkpointInfo
 		wantOutput  bool
 		wantErr     bool
 	}{
 		{
 			name: "valid checkpoint",
-			checkpoint: ContainerCheckpoint{
-				Name:    "test-container",
-				Image:   "nginx:latest",
-				ID:      "test-id",
-				Runtime: "crun",
-				Created: "2025-04-06T20:47:07Z",
-				Engine:  "Podman",
-				IP:      "10.88.0.39",
-				MAC:     "7a:54:cc:62:e4:e7",
+			checkpoint: &checkpointInfo{
+				Config: &metadata.ContainerConfig{
+					Name:    "test-container",
+					Image:   "nginx:latest",
+					ID:      "test-id",
+					Created: "2025-04-06T20:47:07Z",
+					NetworkSettings: metadata.NetworkSettings{
+						IPAddress:  "10.88.0.39",
+						MacAddress: "7a:54:cc:62:e4:e7",
+					},
+				},
+				Spec: &specs.Spec{
+					Version: "1.0.0",
+					Root: &specs.Root{
+						Path: "rootfs",
+					},
+				},
+				Engine: "podman",
 			},
 			wantOutput: true,
 			wantErr:    false,
 		},
 		{
 			name:       "empty checkpoint",
-			checkpoint: ContainerCheckpoint{},
+			checkpoint: &checkpointInfo{},
 			wantOutput: true,
 			wantErr:    false,
 		},
@@ -51,31 +70,40 @@ func TestRenderTreeView(t *testing.T) {
 func TestBuildTree(t *testing.T) {
 	tests := []struct {
 		name       string
-		info       map[string]interface{}
+		info       *checkpointInfo
 		wantNodes  int
 		wantErr    bool
 	}{
 		{
 			name: "valid info",
-			info: map[string]interface{}{
-				"ID":      "test-id",
-				"Name":    "test-container",
-				"Image":   "nginx:latest",
-				"Created": "2025-04-06T20:47:07Z",
-				"State": map[string]interface{}{
-					"Status": "running",
+			info: &checkpointInfo{
+				Config: &metadata.ContainerConfig{
+					ID:      "test-id",
+					Name:    "test-container",
+					Image:   "nginx:latest",
+					Created: "2025-04-06T20:47:07Z",
+					State: metadata.State{
+						Status: "running",
+					},
+					NetworkSettings: metadata.NetworkSettings{
+						IPAddress:  "10.88.0.39",
+						MacAddress: "7a:54:cc:62:e4:e7",
+					},
 				},
-				"NetworkSettings": map[string]interface{}{
-					"IPAddress":  "10.88.0.39",
-					"MacAddress": "7a:54:cc:62:e4:e7",
+				Spec: &specs.Spec{
+					Version: "1.0.0",
+					Root: &specs.Root{
+						Path: "rootfs",
+					},
 				},
+				Engine: "podman",
 			},
 			wantNodes: 6,
 			wantErr:   false,
 		},
 		{
-			name:      "empty info",
-			info:      map[string]interface{}{},
+			name: "empty info",
+			info: &checkpointInfo{},
 			wantNodes: 0,
 			wantErr:   false,
 		},
@@ -98,11 +126,11 @@ func TestBuildTree(t *testing.T) {
 }
 
 func TestAddMountsToTree(t *testing.T) {
-	mounts := []map[string]interface{}{
+	mounts := []specs.Mount{
 		{
-			"Source": "/test/source",
-			"Destination": "/test/dest",
-			"Type": "bind",
+			Source:      "/test/source",
+			Destination: "/test/dest",
+			Type:        "bind",
 		},
 	}
 
