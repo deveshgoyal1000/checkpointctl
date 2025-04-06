@@ -92,14 +92,18 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 	}
 
 	// 2. Missing spec.dump
-	os.Remove(specFile)
+	if err := os.Remove(specFile); err != nil {
+		t.Fatalf("Failed to remove spec.dump: %v", err)
+	}
 	_, err = ib.getCheckpointAnnotations()
 	if err == nil {
 		t.Error("Expected error for missing spec.dump")
 	}
 
 	// 3. Missing config.dump
-	os.Remove(configFile)
+	if err := os.Remove(configFile); err != nil {
+		t.Fatalf("Failed to remove config.dump: %v", err)
+	}
 	_, err = ib.getCheckpointAnnotations()
 	if err == nil {
 		t.Error("Expected error for missing config.dump")

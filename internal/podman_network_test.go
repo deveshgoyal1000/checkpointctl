@@ -62,7 +62,7 @@ func TestGetPodmanNetworkInfo(t *testing.T) {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
 
-	ip, mac, err = getPodmanNetworkInfo(invalidJSONFile)
+	_, _, err = getPodmanNetworkInfo(invalidJSONFile)
 	if err == nil {
 		t.Error("getPodmanNetworkInfo should fail with invalid JSON")
 	}

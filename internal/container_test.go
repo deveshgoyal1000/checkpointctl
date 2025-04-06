@@ -33,9 +33,9 @@ func setupNetworkTest(t *testing.T) (string, string) {
 		t.Fatalf("Failed to write network.status: %v", err)
 	}
 
-	// Create checkpoint archive
+	// Create checkpoint archive with network.status
 	archivePath := filepath.Join(tmpDir, "checkpoint.tar")
-	if err := os.WriteFile(archivePath, []byte("test data"), 0644); err != nil {
+	if err := os.WriteFile(archivePath, []byte(networkStatus), 0644); err != nil {
 		t.Fatalf("Failed to write archive: %v", err)
 	}
 
@@ -64,6 +64,11 @@ func TestGetPodmanInfo(t *testing.T) {
 	task := Task{
 		OutputDir:          tmpDir,
 		CheckpointFilePath: archivePath,
+	}
+
+	// Extract network.status to the output directory
+	if err := UntarFiles(archivePath, tmpDir, []string{metadata.NetworkStatusFile}); err != nil {
+		t.Fatalf("Failed to extract network.status: %v", err)
 	}
 
 	info := getPodmanInfo(containerConfig, specDump, task)
@@ -170,7 +175,7 @@ func TestGetContainerInfo(t *testing.T) {
 	if err != nil {
 		t.Errorf("getContainerInfo failed: %v", err)
 	}
-	if infoUnknown.Engine != "Containerd" {
-		t.Errorf("Expected engine %s, got %s", "Containerd", infoUnknown.Engine)
+	if infoUnknown.Engine != "containerd" {
+		t.Errorf("Expected engine %s, got %s", "containerd", infoUnknown.Engine)
 	}
 }
