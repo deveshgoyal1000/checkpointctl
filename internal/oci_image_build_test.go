@@ -79,10 +79,11 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 	}
 
 	// Create ImageBuilder with the correct archive path
-	ib := NewImageBuilder(archivePath, "test-image:latest")
-
-	// Set the output directory to tmpDir
-	ib.(*imageBuilder).outputDir = tmpDir
+	ib := &imageBuilder{
+		checkpointPath: archivePath,
+		imageName:     "test-image:latest",
+		outputDir:     tmpDir,
+	}
 
 	// Test getCheckpointAnnotations
 	annotations, err := ib.getCheckpointAnnotations()
@@ -97,7 +98,10 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 
 	// Test error cases
 	// 1. Invalid archive path
-	ibInvalid := NewImageBuilder("invalid.tar", "test-image:latest")
+	ibInvalid := &imageBuilder{
+		checkpointPath: "invalid.tar",
+		imageName:     "test-image:latest",
+	}
 	_, err = ibInvalid.getCheckpointAnnotations()
 	if err == nil {
 		t.Error("Expected error for invalid archive path")
