@@ -253,25 +253,25 @@ func UntarFiles(src, dest string, files []string) error {
 	}
 	defer archiveFile.Close()
 
-	err = iterateTarArchive(src, func(r *tar.Reader, header *tar.Header) error {
+	if err := iterateTarArchive(src, func(r *tar.Reader, header *tar.Header) error {
 		// Check if the current entry is one of the target files
 		for _, file := range files {
 			if strings.Contains(header.Name, file) {
 				// Create the destination folder
 				if err := os.MkdirAll(filepath.Join(dest, filepath.Dir(header.Name)), 0o700); err != nil {
-					return fmt.Errorf("failed to create directory: %w", err)
+					return err
 				}
 				// Create the destination file
 				destFile, err := os.Create(filepath.Join(dest, header.Name))
 				if err != nil {
-					return fmt.Errorf("failed to create file: %w", err)
+					return err
 				}
 				defer destFile.Close()
 
 				// Copy the contents of the entry to the destination file
 				_, err = io.Copy(destFile, r)
 				if err != nil {
-					return fmt.Errorf("failed to copy file contents: %w", err)
+					return err
 				}
 
 				// File successfully extracted, move to the next file
@@ -279,9 +279,8 @@ func UntarFiles(src, dest string, files []string) error {
 			}
 		}
 		return nil
-	})
-	if err != nil {
-		return fmt.Errorf("Error: %v", err)
+	}); err != nil {
+		return err
 	}
 
 	return nil
