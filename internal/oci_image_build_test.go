@@ -34,13 +34,13 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 
 	// Write spec.dump
 	specFile := filepath.Join(tmpDir, "spec.dump")
-	if err := metadata.WriteJSONFile(specDump, specFile, "spec.dump"); err != nil {
+	if _, err := metadata.WriteJSONFile(specDump, specFile, "spec.dump"); err != nil {
 		t.Fatalf("Failed to write spec.dump: %v", err)
 	}
 
 	// Write config.dump
 	configFile := filepath.Join(tmpDir, "config.dump")
-	if err := metadata.WriteJSONFile(containerConfig, configFile, "config.dump"); err != nil {
+	if _, err := metadata.WriteJSONFile(containerConfig, configFile, "config.dump"); err != nil {
 		t.Fatalf("Failed to write config.dump: %v", err)
 	}
 
