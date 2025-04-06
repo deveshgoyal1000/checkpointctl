@@ -108,24 +108,30 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to unmarshal config.dump: %w", err)
+		if strings.Contains(err.Error(), "unexpected end of JSON input") {
+			return nil, fmt.Errorf("config.dump: unexpected end of JSON input")
+		}
+		return nil, fmt.Errorf("config.dump: %w", err)
 	}
 	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("spec.dump: no such file or directory")
 		}
-		return nil, fmt.Errorf("failed to unmarshal spec.dump: %w", err)
+		if strings.Contains(err.Error(), "unexpected end of JSON input") {
+			return nil, fmt.Errorf("spec.dump: unexpected end of JSON input")
+		}
+		return nil, fmt.Errorf("spec.dump: %w", err)
 	}
 
 	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump, task)
 	if err != nil {
-		return nil, fmt.Errorf("getting container checkpoint information failed: %w", err)
+		return nil, err
 	}
 
 	info.archiveSizes, err = getArchiveSizes(task.CheckpointFilePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get archive sizes: %w", err)
+		return nil, err
 	}
 
 	return info, nil
