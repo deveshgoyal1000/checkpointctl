@@ -61,7 +61,6 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, specDump *specs.Sp
 			defer os.RemoveAll(tmpDir)
 			
 			// Extract network.status file
-			fmt.Printf("Extracting network.status from: %s\n", task.CheckpointFilePath)
 			err = UntarFiles(task.CheckpointFilePath, tmpDir, []string{metadata.NetworkStatusFile})
 			if err == nil {
 				networkStatusFile := filepath.Join(tmpDir, metadata.NetworkStatusFile)
@@ -69,7 +68,6 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, specDump *specs.Sp
 				if err == nil {
 					info.IP = ip
 					info.MAC = mac
-					fmt.Printf("Found network info - IP: %s, MAC: %s\n", ip, mac)
 				}
 			}
 		}
@@ -110,27 +108,34 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 	info.configDump, _, err = metadata.ReadContainerCheckpointConfigDump(task.OutputDir)
 	if err != nil {
-		return nil, fmt.Errorf("config.dump: %w", err)
+		return nil, fmt.Errorf("failed to unmarshal config.dump: %w", err)
 	}
 	info.specDump, _, err = metadata.ReadContainerCheckpointSpecDump(task.OutputDir)
 	if err != nil {
-		return nil, fmt.Errorf("spec.dump: %w", err)
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("spec.dump: no such file or directory")
+		}
+		return nil, fmt.Errorf("failed to unmarshal spec.dump: %w", err)
 	}
 
 	info.containerInfo, err = getContainerInfo(info.specDump, info.configDump, task)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("getting container checkpoint information failed: %w", err)
 	}
 
 	info.archiveSizes, err = getArchiveSizes(task.CheckpointFilePath)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to get archive sizes: %w", err)
 	}
 
 	return info, nil
 }
 
 func ShowContainerCheckpoints(tasks []Task) error {
+	if len(tasks) == 1 {
+		fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
+	}
+
 	table := tablewriter.NewWriter(os.Stdout)
 	header := []string{
 		"Container",
@@ -139,39 +144,18 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Runtime",
 		"Created",
 		"Engine",
-	}
-
-	// Get first checkpoint info to determine columns
-	if len(tasks) > 0 {
-		info, err := getCheckpointInfo(tasks[0])
-		if err != nil {
-			return fmt.Errorf("failed to get checkpoint info: %v", err)
-		}
-
-		if len(tasks) == 1 {
-			fmt.Printf("\nDisplaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
-			if info.containerInfo.IP != "" {
-				header = append(header, "IP")
-			}
-			if info.containerInfo.MAC != "" {
-				header = append(header, "MAC")
-			}
-			header = append(header, "CHKPT Size")
-			if info.archiveSizes.rootFsDiffTarSize > 0 {
-				header = append(header, "Root FS Diff Size")
-			}
-		} else {
-			header = append(header, "IP", "MAC", "CHKPT Size", "Root FS Diff Size")
-		}
+		"IP",
+		"MAC",
+		"CHKPT Size",
+		"Root FS Diff Size",
 	}
 
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
 		if err != nil {
-			return fmt.Errorf("failed to get checkpoint info: %v", err)
+			return err
 		}
 
-		// Build row data in the same order as headers
 		var row []string
 		row = append(row, info.containerInfo.Name)
 		row = append(row, info.configDump.RootfsImageName)
@@ -183,24 +167,10 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		row = append(row, info.configDump.OCIRuntime)
 		row = append(row, info.containerInfo.Created)
 		row = append(row, info.containerInfo.Engine)
-
-		if len(tasks) == 1 {
-			if info.containerInfo.IP != "" {
-				row = append(row, info.containerInfo.IP)
-			}
-			if info.containerInfo.MAC != "" {
-				row = append(row, info.containerInfo.MAC)
-			}
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-			if info.archiveSizes.rootFsDiffTarSize > 0 {
-				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-			}
-		} else {
-			row = append(row, info.containerInfo.IP)
-			row = append(row, info.containerInfo.MAC)
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
-			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
-		}
+		row = append(row, info.containerInfo.IP)
+		row = append(row, info.containerInfo.MAC)
+		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
+		row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 
 		table.Append(row)
 	}
