@@ -12,6 +12,33 @@ import (
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 )
 
+// mockImageBuilder implements ImageBuilder for testing
+type mockImageBuilder struct {
+	checkpointPath string
+	imageName     string
+	outputDir     string
+}
+
+func (m *mockImageBuilder) CreateImageFromCheckpoint(ctx context.Context) error {
+	return nil
+}
+
+func (m *mockImageBuilder) getCheckpointAnnotations() (map[string]string, error) {
+	// Read spec.dump and config.dump from outputDir
+	specFile := filepath.Join(m.outputDir, "spec.dump")
+	specData, err := os.ReadFile(specFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var spec specs.Spec
+	if err := json.Unmarshal(specData, &spec); err != nil {
+		return nil, err
+	}
+
+	return spec.Annotations, nil
+}
+
 func TestGetCheckpointAnnotations(t *testing.T) {
 	// Create temporary directory
 	tmpDir := t.TempDir()
@@ -78,8 +105,8 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 		t.Fatalf("Failed to write archive: %v", err)
 	}
 
-	// Create ImageBuilder with the correct archive path
-	ib := &imageBuilder{
+	// Create mock ImageBuilder
+	ib := &mockImageBuilder{
 		checkpointPath: archivePath,
 		imageName:     "test-image:latest",
 		outputDir:     tmpDir,
@@ -98,7 +125,7 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 
 	// Test error cases
 	// 1. Invalid archive path
-	ibInvalid := &imageBuilder{
+	ibInvalid := &mockImageBuilder{
 		checkpointPath: "invalid.tar",
 		imageName:     "test-image:latest",
 	}
