@@ -136,6 +136,7 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 func ShowContainerCheckpoints(tasks []Task) error {
 	table := tablewriter.NewWriter(os.Stdout)
+	// Set up base header columns
 	header := []string{
 		"Container",
 		"Image",
@@ -145,20 +146,28 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Engine",
 	}
 
-	if len(tasks) == 1 {
-		fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
-		header = append(header, "CHKPT Size")
-		if info.archiveSizes.rootFsDiffTarSize > 0 {
-			header = append(header, "Root FS Diff Size")
+	// Get first checkpoint info to determine columns
+	if len(tasks) > 0 {
+		info, err := getCheckpointInfo(tasks[0])
+		if err != nil {
+			return err
 		}
-		if info.containerInfo.IP != "" {
-			header = append(header, "IP")
+
+		if len(tasks) == 1 {
+			fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
+			header = append(header, "CHKPT Size")
+			if info.archiveSizes.rootFsDiffTarSize > 0 {
+				header = append(header, "Root FS Diff Size")
+			}
+			if info.containerInfo.IP != "" {
+				header = append(header, "IP")
+			}
+			if info.containerInfo.MAC != "" {
+				header = append(header, "MAC")
+			}
+		} else {
+			header = append(header, "CHKPT Size", "Root FS Diff Size", "IP", "MAC")
 		}
-		if info.containerInfo.MAC != "" {
-			header = append(header, "MAC")
-		}
-	} else {
-		header = append(header, "CHKPT Size", "Root FS Diff Size", "IP", "MAC")
 	}
 
 	for _, task := range tasks {
@@ -180,8 +189,9 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		row = append(row, info.containerInfo.Created)
 		row = append(row, info.containerInfo.Engine)
 
+		// Add data in the same order as headers
+		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
 		if len(tasks) == 1 {
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
 			if info.archiveSizes.rootFsDiffTarSize > 0 {
 				row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 			}
@@ -192,7 +202,6 @@ func ShowContainerCheckpoints(tasks []Task) error {
 				row = append(row, info.containerInfo.MAC)
 			}
 		} else {
-			row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
 			row = append(row, metadata.ByteToString(info.archiveSizes.rootFsDiffTarSize))
 			row = append(row, info.containerInfo.IP)
 			row = append(row, info.containerInfo.MAC)
