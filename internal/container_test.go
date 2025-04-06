@@ -5,8 +5,9 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
-	"github.com/checkpoint-restore/checkpointctl/lib"
+	metadata "github.com/checkpoint-restore/checkpointctl/lib"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -19,96 +20,83 @@ func TestGetPodmanInfo(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create test config.dump
-	configData := map[string]interface{}{
-		"ID":     "test-container-id",
-		"Name":   "test-container",
-		"Image":  "nginx:latest",
-		"Created": "2025-04-06T20:47:07Z",
-		"State": map[string]interface{}{
-			"Status": "running",
-		},
-		"NetworkSettings": map[string]interface{}{
-			"IPAddress":  "10.88.0.39",
-			"MacAddress": "7a:54:cc:62:e4:e7",
-		},
+	configData := &metadata.ContainerConfig{
+		ID:          "test-container-id",
+		Name:        "test-container",
+		Image:       "nginx:latest",
+		CreatedTime: time.Now(),
 	}
-	
+
 	configPath := filepath.Join(tmpDir, "config.dump")
-	if err := lib.WriteJSONFile(configPath, configData); err != nil {
+	if err := metadata.WriteJSONFile(configPath, configData); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create test spec.dump
-	specData := map[string]interface{}{
-		"annotations": map[string]string{
-			"io.containerd.image.name": "nginx:latest",
+	specData := &specs.Spec{
+		Annotations: map[string]string{
+			"io.container.manager": "libpod",
 		},
 	}
 	specPath := filepath.Join(tmpDir, "spec.dump")
-	if err := lib.WriteJSONFile(specPath, specData); err != nil {
+	if err := metadata.WriteJSONFile(specPath, specData); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create test checkpoint archive
+	archivePath := filepath.Join(tmpDir, "checkpoint.tar")
+	if err := createTestArchive(archivePath); err != nil {
 		t.Fatal(err)
 	}
 
 	// Test getPodmanInfo
-	task := &Task{
-		Dir: tmpDir,
-	}
-	info, err := getPodmanInfo(task)
-	if err != nil {
-		t.Errorf("getPodmanInfo failed: %v", err)
+	task := Task{
+		CheckpointFilePath: archivePath,
+		OutputDir:         tmpDir,
+		Engine:            "podman",
 	}
 
-	// Verify the parsed information
-	if info.Config.ID != "test-container-id" {
-		t.Errorf("Expected ID %s, got %s", "test-container-id", info.Config.ID)
+	info := getPodmanInfo(configData, specData, task)
+	if info.Name != "test-container" {
+		t.Errorf("Expected Name %s, got %s", "test-container", info.Name)
 	}
-	if info.Config.Name != "test-container" {
-		t.Errorf("Expected Name %s, got %s", "test-container", info.Config.Name)
-	}
-	if info.Config.Image != "nginx:latest" {
-		t.Errorf("Expected Image %s, got %s", "nginx:latest", info.Config.Image)
+	if info.Engine != "Podman" {
+		t.Errorf("Expected Engine %s, got %s", "Podman", info.Engine)
 	}
 }
 
 func TestGetContainerdInfo(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "checkpoint-test")
-	if err != nil {
-		t.Fatal(err)
+	// Create test data
+	configData := &metadata.ContainerConfig{
+		ID:          "test-container-id",
+		Name:        "test-container",
+		Image:       "nginx:latest",
+		CreatedTime: time.Now(),
 	}
-	defer os.RemoveAll(tmpDir)
 
-	// Create test spec.dump
-	specData := map[string]interface{}{
-		"annotations": map[string]string{
-			"io.containerd.image.name":            "docker.io/library/nginx:latest",
+	specData := &specs.Spec{
+		Annotations: map[string]string{
 			"io.kubernetes.cri.container-name":    "test-container",
-			"io.kubernetes.cri.container-id":      "test-container-id",
+			"io.kubernetes.cri.sandbox-namespace": "test-namespace",
+			"io.kubernetes.cri.sandbox-name":      "test-pod",
 		},
-	}
-	
-	specPath := filepath.Join(tmpDir, "spec.dump")
-	if err := lib.WriteJSONFile(specPath, specData); err != nil {
-		t.Fatal(err)
 	}
 
 	// Test getContainerdInfo
-	task := &Task{
-		Dir: tmpDir,
-	}
-	info, err := getContainerdInfo(task)
-	if err != nil {
-		t.Errorf("getContainerdInfo failed: %v", err)
-	}
+	info := getContainerdInfo(configData, specData)
 
 	// Verify the parsed information
-	if info.Config.ID != "test-container-id" {
-		t.Errorf("Expected ID %s, got %s", "test-container-id", info.Config.ID)
+	if info.Name != "test-container" {
+		t.Errorf("Expected Name %s, got %s", "test-container", info.Name)
 	}
-	if info.Config.Name != "test-container" {
-		t.Errorf("Expected Name %s, got %s", "test-container", info.Config.Name)
+	if info.Engine != "containerd" {
+		t.Errorf("Expected Engine %s, got %s", "containerd", info.Engine)
 	}
-	if info.Config.Image != "docker.io/library/nginx:latest" {
-		t.Errorf("Expected Image %s, got %s", "docker.io/library/nginx:latest", info.Config.Image)
+	if info.Namespace != "test-namespace" {
+		t.Errorf("Expected Namespace %s, got %s", "test-namespace", info.Namespace)
+	}
+	if info.Pod != "test-pod" {
+		t.Errorf("Expected Pod %s, got %s", "test-pod", info.Pod)
 	}
 }
 
@@ -120,18 +108,29 @@ func TestGetCheckpointInfo(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create test files
-	files := []string{
-		"config.dump",
-		"spec.dump",
-		"status",
-		"deleted.files",
+	configData := &metadata.ContainerConfig{
+		ID:          "test-container-id",
+		Name:        "test-container",
+		Image:       "nginx:latest",
+		CreatedTime: time.Now(),
+	}
+	if err := metadata.WriteJSONFile(filepath.Join(tmpDir, "config.dump"), configData); err != nil {
+		t.Fatal(err)
 	}
 
-	for _, f := range files {
-		path := filepath.Join(tmpDir, f)
-		if err := os.WriteFile(path, []byte("test"), 0644); err != nil {
-			t.Fatal(err)
-		}
+	specData := &specs.Spec{
+		Annotations: map[string]string{
+			"io.container.manager": "libpod",
+		},
+	}
+	if err := metadata.WriteJSONFile(filepath.Join(tmpDir, "spec.dump"), specData); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create test checkpoint archive
+	archivePath := filepath.Join(tmpDir, "checkpoint.tar")
+	if err := createTestArchive(archivePath); err != nil {
+		t.Fatal(err)
 	}
 
 	// Test with different engine types
@@ -146,9 +145,10 @@ func TestGetCheckpointInfo(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			task := &Task{
-				Dir:    tmpDir,
-				Engine: tt.engine,
+			task := Task{
+				CheckpointFilePath: archivePath,
+				OutputDir:         tmpDir,
+				Engine:            tt.engine,
 			}
 			info, err := getCheckpointInfo(task)
 			if err != nil {
@@ -175,13 +175,16 @@ func TestShowContainerCheckpoints(t *testing.T) {
 	}
 
 	// Test ShowContainerCheckpoints
-	checkpoints, err := ShowContainerCheckpoints([]string{archivePath})
+	tasks := []Task{
+		{
+			CheckpointFilePath: archivePath,
+			OutputDir:         tmpDir,
+			Engine:            "podman",
+		},
+	}
+	err = ShowContainerCheckpoints(tasks)
 	if err != nil {
 		t.Errorf("ShowContainerCheckpoints failed: %v", err)
-	}
-
-	if len(checkpoints) != 1 {
-		t.Errorf("Expected 1 checkpoint, got %d", len(checkpoints))
 	}
 }
 

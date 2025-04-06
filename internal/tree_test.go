@@ -2,10 +2,18 @@ package internal
 
 import (
 	"testing"
+	"time"
 
-	"github.com/checkpoint-restore/checkpointctl/lib"
+	metadata "github.com/checkpoint-restore/checkpointctl/lib"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
+
+// TreeNode represents a node in the tree view.
+type TreeNode struct {
+	Text     string
+	Nodes    []*TreeNode
+	Selected bool
+}
 
 func TestRenderTreeView(t *testing.T) {
 	tests := []struct {
@@ -17,23 +25,34 @@ func TestRenderTreeView(t *testing.T) {
 		{
 			name: "valid checkpoint",
 			checkpoint: &checkpointInfo{
-				Config: &lib.ContainerConfig{
+				containerInfo: &containerInfo{
 					Name:    "test-container",
-					Image:   "nginx:latest",
-					ID:      "test-id",
-					Created: "2025-04-06T20:47:07Z",
-					NetworkSettings: lib.NetworkSettings{
-						IPAddress:  "10.88.0.39",
-						MacAddress: "7a:54:cc:62:e4:e7",
-					},
+					Created: time.Now().Format(time.RFC3339),
+					Engine:  "Podman",
+					IP:      "10.88.0.39",
+					MAC:     "7a:54:cc:62:e4:e7",
 				},
-				Spec: &specs.Spec{
+				configDump: &metadata.ContainerConfig{
+					ID:             "test-id",
+					Name:           "test-container",
+					Image:          "nginx:latest",
+					CreatedTime:    time.Now(),
+					OCIRuntime:     "crun",
+					RootfsImageName: "docker.io/library/nginx:latest",
+				},
+				specDump: &specs.Spec{
 					Version: "1.0.0",
 					Root: &specs.Root{
 						Path: "rootfs",
 					},
+					Annotations: map[string]string{
+						"io.container.manager": "libpod",
+					},
 				},
-				Engine: "podman",
+				archiveSizes: &archiveSizes{
+					checkpointSize:    1024,
+					rootFsDiffTarSize: 512,
+				},
 			},
 			wantOutput: true,
 			wantErr:    false,
@@ -70,26 +89,34 @@ func TestBuildTree(t *testing.T) {
 		{
 			name: "valid info",
 			info: &checkpointInfo{
-				Config: &lib.ContainerConfig{
-					ID:      "test-id",
+				containerInfo: &containerInfo{
 					Name:    "test-container",
-					Image:   "nginx:latest",
-					Created: "2025-04-06T20:47:07Z",
-					State: lib.State{
-						Status: "running",
-					},
-					NetworkSettings: lib.NetworkSettings{
-						IPAddress:  "10.88.0.39",
-						MacAddress: "7a:54:cc:62:e4:e7",
-					},
+					Created: time.Now().Format(time.RFC3339),
+					Engine:  "Podman",
+					IP:      "10.88.0.39",
+					MAC:     "7a:54:cc:62:e4:e7",
 				},
-				Spec: &specs.Spec{
+				configDump: &metadata.ContainerConfig{
+					ID:             "test-id",
+					Name:           "test-container",
+					Image:          "nginx:latest",
+					CreatedTime:    time.Now(),
+					OCIRuntime:     "crun",
+					RootfsImageName: "docker.io/library/nginx:latest",
+				},
+				specDump: &specs.Spec{
 					Version: "1.0.0",
 					Root: &specs.Root{
 						Path: "rootfs",
 					},
+					Annotations: map[string]string{
+						"io.container.manager": "libpod",
+					},
 				},
-				Engine: "podman",
+				archiveSizes: &archiveSizes{
+					checkpointSize:    1024,
+					rootFsDiffTarSize: 512,
+				},
 			},
 			wantNodes: 6,
 			wantErr:   false,
@@ -127,7 +154,7 @@ func TestAddMountsToTree(t *testing.T) {
 		},
 	}
 
-	tree := &treeNode{
+	tree := &TreeNode{
 		Text: "root",
 	}
 
@@ -162,7 +189,7 @@ func TestAddPsTreeToTree(t *testing.T) {
 		},
 	}
 
-	tree := &treeNode{
+	tree := &TreeNode{
 		Text: "root",
 	}
 
@@ -186,7 +213,7 @@ func TestAddPsTreeToTree(t *testing.T) {
 }
 
 // Helper function to count nodes in tree
-func countNodes(node *treeNode) int {
+func countNodes(node *TreeNode) int {
 	if node == nil {
 		return 0
 	}
