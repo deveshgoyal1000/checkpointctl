@@ -139,7 +139,7 @@ func getCheckpointInfo(task Task) (*checkpointInfo, error) {
 
 func ShowContainerCheckpoints(tasks []Task) error {
 	if len(tasks) == 1 {
-		fmt.Printf("Displaying container checkpoint data from %s\n", tasks[0].CheckpointFilePath)
+		fmt.Printf("Displaying container checkpoint data from %s\n\n", tasks[0].CheckpointFilePath)
 	}
 
 	table := tablewriter.NewWriter(os.Stdout)
@@ -159,12 +159,7 @@ func ShowContainerCheckpoints(tasks []Task) error {
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
 		if err != nil {
-			// Remove "Error: " prefix from error messages
-			errStr := err.Error()
-			if strings.HasPrefix(errStr, "Error: ") {
-				errStr = errStr[7:]
-			}
-			return fmt.Errorf("%s", errStr)
+			return err
 		}
 
 		var row []string
