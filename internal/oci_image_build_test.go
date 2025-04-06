@@ -78,8 +78,11 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 		t.Fatalf("Failed to write archive: %v", err)
 	}
 
-	// Create ImageBuilder
+	// Create ImageBuilder with the correct archive path
 	ib := NewImageBuilder(archivePath, "test-image:latest")
+
+	// Set the output directory to tmpDir
+	ib.(*imageBuilder).outputDir = tmpDir
 
 	// Test getCheckpointAnnotations
 	annotations, err := ib.getCheckpointAnnotations()
