@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/checkpoint-restore/checkpointctl/lib/metadata"
+	"github.com/checkpoint-restore/checkpointctl/lib"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
 
@@ -41,8 +41,8 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 	}
 
 	// Create test spec.dump with annotations
-	specData := &specs.Spec{
-		Annotations: map[string]string{
+	specData := map[string]interface{}{
+		"annotations": map[string]string{
 			"io.containerd.image.name":         "docker.io/library/nginx:latest",
 			"io.kubernetes.cri.sandbox-name":   "test-pod",
 			"io.kubernetes.cri.sandbox-id":     "test-pod-id",
@@ -51,20 +51,20 @@ func TestCreateImageFromCheckpoint(t *testing.T) {
 	}
 
 	specPath := filepath.Join(checkpointDir, "spec.dump")
-	if err := metadata.WriteJSONFile(specPath, specData); err != nil {
+	if err := lib.WriteJSONFile(specPath, specData); err != nil {
 		t.Fatal(err)
 	}
 
 	// Create test config.dump
-	configData := &metadata.ContainerConfig{
-		ID:     "test-container-id",
-		Name:   "test-container",
-		Image:  "nginx:latest",
-		Labels: map[string]string{"test": "value"},
+	configData := map[string]interface{}{
+		"ID":     "test-container-id",
+		"Name":   "test-container",
+		"Image":  "nginx:latest",
+		"Labels": map[string]string{"test": "value"},
 	}
 
 	configPath := filepath.Join(checkpointDir, "config.dump")
-	if err := metadata.WriteJSONFile(configPath, configData); err != nil {
+	if err := lib.WriteJSONFile(configPath, configData); err != nil {
 		t.Fatal(err)
 	}
 
@@ -139,15 +139,15 @@ func TestGetCheckpointAnnotations(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create test spec.dump with annotations
-	specData := &specs.Spec{
-		Annotations: map[string]string{
+	specData := map[string]interface{}{
+		"annotations": map[string]string{
 			"test.annotation.1": "value1",
 			"test.annotation.2": "value2",
 		},
 	}
 
 	specPath := filepath.Join(tmpDir, "spec.dump")
-	if err := metadata.WriteJSONFile(specPath, specData); err != nil {
+	if err := lib.WriteJSONFile(specPath, specData); err != nil {
 		t.Fatal(err)
 	}
 

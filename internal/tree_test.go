@@ -3,16 +3,9 @@ package internal
 import (
 	"testing"
 
-	"github.com/checkpoint-restore/checkpointctl/lib/metadata"
+	"github.com/checkpoint-restore/checkpointctl/lib"
 	"github.com/opencontainers/runtime-spec/specs-go"
 )
-
-// TreeNode represents a node in the tree view
-type TreeNode struct {
-	Text     string
-	Nodes    []*TreeNode
-	Selected bool
-}
 
 func TestRenderTreeView(t *testing.T) {
 	tests := []struct {
@@ -24,12 +17,12 @@ func TestRenderTreeView(t *testing.T) {
 		{
 			name: "valid checkpoint",
 			checkpoint: &checkpointInfo{
-				Config: &metadata.ContainerConfig{
+				Config: &lib.ContainerConfig{
 					Name:    "test-container",
 					Image:   "nginx:latest",
 					ID:      "test-id",
 					Created: "2025-04-06T20:47:07Z",
-					NetworkSettings: metadata.NetworkSettings{
+					NetworkSettings: lib.NetworkSettings{
 						IPAddress:  "10.88.0.39",
 						MacAddress: "7a:54:cc:62:e4:e7",
 					},
@@ -77,15 +70,15 @@ func TestBuildTree(t *testing.T) {
 		{
 			name: "valid info",
 			info: &checkpointInfo{
-				Config: &metadata.ContainerConfig{
+				Config: &lib.ContainerConfig{
 					ID:      "test-id",
 					Name:    "test-container",
 					Image:   "nginx:latest",
 					Created: "2025-04-06T20:47:07Z",
-					State: metadata.State{
+					State: lib.State{
 						Status: "running",
 					},
-					NetworkSettings: metadata.NetworkSettings{
+					NetworkSettings: lib.NetworkSettings{
 						IPAddress:  "10.88.0.39",
 						MacAddress: "7a:54:cc:62:e4:e7",
 					},
@@ -134,7 +127,7 @@ func TestAddMountsToTree(t *testing.T) {
 		},
 	}
 
-	tree := &TreeNode{
+	tree := &treeNode{
 		Text: "root",
 	}
 
@@ -169,7 +162,7 @@ func TestAddPsTreeToTree(t *testing.T) {
 		},
 	}
 
-	tree := &TreeNode{
+	tree := &treeNode{
 		Text: "root",
 	}
 
@@ -193,7 +186,7 @@ func TestAddPsTreeToTree(t *testing.T) {
 }
 
 // Helper function to count nodes in tree
-func countNodes(node *TreeNode) int {
+func countNodes(node *treeNode) int {
 	if node == nil {
 		return 0
 	}
