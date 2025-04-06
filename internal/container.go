@@ -159,7 +159,12 @@ func ShowContainerCheckpoints(tasks []Task) error {
 	for _, task := range tasks {
 		info, err := getCheckpointInfo(task)
 		if err != nil {
-			return err
+			// Remove "Error: " prefix from error messages
+			errStr := err.Error()
+			if strings.HasPrefix(errStr, "Error: ") {
+				errStr = errStr[7:]
+			}
+			return fmt.Errorf("%s", errStr)
 		}
 
 		var row []string
