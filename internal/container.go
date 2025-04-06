@@ -31,8 +31,7 @@ type containerMetadata struct {
 
 type containerInfo struct {
 	Name      string
-	IP        string
-	MAC       string
+	Networks  []NetworkInfo
 	Created   string
 	Engine    string
 	Namespace string
@@ -61,19 +60,16 @@ func getPodmanInfo(containerConfig *metadata.ContainerConfig, specDump *specs.Sp
 			defer os.RemoveAll(tmpDir)
 			
 			// Extract network.status file
-			fmt.Printf("Extracting network.status from: %s\n", task.CheckpointFilePath)
 			err = UntarFiles(task.CheckpointFilePath, tmpDir, []string{metadata.NetworkStatusFile})
 			if err != nil {
-				fmt.Printf("failed to extract network.status: %v\n", err)
+				fmt.Printf("Warning: failed to extract network.status: %v\n", err)
 			} else {
 				networkStatusFile := filepath.Join(tmpDir, metadata.NetworkStatusFile)
-				ip, mac, err := getPodmanNetworkInfo(networkStatusFile)
+				networks, err := getPodmanNetworkInfo(networkStatusFile)
 				if err != nil {
-					fmt.Printf("failed to read network info: %v\n", err)
-				} else {
-					info.IP = ip
-					info.MAC = mac
-					fmt.Printf("Found network info - IP: %s, MAC: %s\n", ip, mac)
+					fmt.Printf("Warning: failed to read network info: %v\n", err)
+				} else if len(networks) > 0 {
+					info.Networks = networks
 				}
 			}
 		}
@@ -89,6 +85,7 @@ func getContainerdInfo(containerConfig *metadata.ContainerConfig, specDump *spec
 		Engine:    "containerd",
 		Namespace: specDump.Annotations["io.kubernetes.cri.sandbox-namespace"],
 		Pod:       specDump.Annotations["io.kubernetes.cri.sandbox-name"],
+		Networks:  []NetworkInfo{}, // Empty slice for consistency with other engines
 	}
 }
 
@@ -98,14 +95,24 @@ func getCRIOInfo(_ *metadata.ContainerConfig, specDump *specs.Spec) (*containerI
 		return nil, fmt.Errorf("failed to read io.kubernetes.cri-o.Metadata: %w", err)
 	}
 
-	return &containerInfo{
-		IP:        specDump.Annotations["io.kubernetes.cri-o.IP.0"],
+	info := &containerInfo{
 		Name:      cm.Name,
 		Created:   specDump.Annotations["io.kubernetes.cri-o.Created"],
 		Engine:    "CRI-O",
 		Namespace: specDump.Annotations["io.kubernetes.pod.namespace"],
 		Pod:       specDump.Annotations["io.kubernetes.pod.name"],
-	}, nil
+	}
+
+	// Handle CRI-O network information
+	if ip := specDump.Annotations["io.kubernetes.cri-o.IP.0"]; ip != "" {
+		info.Networks = []NetworkInfo{{
+			IP: ip,
+			// Note: CRI-O currently doesn't expose MAC and Gateway in annotations
+			// but we maintain the same structure for consistency
+		}}
+	}
+
+	return info, nil
 }
 
 func getCheckpointInfo(task Task) (*checkpointInfo, error) {
@@ -155,6 +162,9 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		"Created",
 		"CHKPT Size",
 		"Image",
+		"Network IPs",
+		"Network MACs",
+		"Network Gateways",
 	}
 
 	for _, task := range tasks {
@@ -178,10 +188,22 @@ func ShowContainerCheckpoints(tasks []Task) error {
 		row = append(row, metadata.ByteToString(info.archiveSizes.checkpointSize))
 		row = append(row, info.configDump.RootfsImageName)
 
-		// Print network info if available
-		if info.containerInfo.IP != "" || info.containerInfo.MAC != "" {
-			fmt.Printf("Found network info - IP: %s, MAC: %s\n", info.containerInfo.IP, info.containerInfo.MAC)
+		// Add network information
+		var ips, macs, gateways []string
+		for _, network := range info.containerInfo.Networks {
+			if network.IP != "" {
+				ips = append(ips, network.IP)
+			}
+			if network.MAC != "" {
+				macs = append(macs, network.MAC)
+			}
+			if network.Gateway != "" {
+				gateways = append(gateways, network.Gateway)
+			}
 		}
+		row = append(row, strings.Join(ips, ", "))
+		row = append(row, strings.Join(macs, ", "))
+		row = append(row, strings.Join(gateways, ", "))
 
 		table.Append(row)
 	}

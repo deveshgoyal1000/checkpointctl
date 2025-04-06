@@ -19,27 +19,37 @@ type PodmanNetworkStatus struct {
 	} `json:"podman"`
 }
 
+// NetworkInfo contains network interface details
+type NetworkInfo struct {
+	IP      string
+	MAC     string
+	Gateway string
+}
+
 // getPodmanNetworkInfo reads and parses the network.status file from a Podman checkpoint
-func getPodmanNetworkInfo(networkStatusFile string) (string, string, error) {
+func getPodmanNetworkInfo(networkStatusFile string) ([]NetworkInfo, error) {
 	data, err := os.ReadFile(networkStatusFile)
 	if err != nil {
-		// Return empty strings if file doesn't exist or can't be read
+		// Return empty slice if file doesn't exist or can't be read
 		// This maintains compatibility with containers that don't have network info
-		return "", "", nil
+		return nil, nil
 	}
 
 	var status PodmanNetworkStatus
 	if err := json.Unmarshal(data, &status); err != nil {
-		return "", "", fmt.Errorf("failed to parse network status: %w", err)
+		return nil, fmt.Errorf("failed to parse network status: %w", err)
 	}
 
-	// Get the first interface's information
-	// Most containers will have a single interface (eth0)
+	var networks []NetworkInfo
 	for _, info := range status.Podman.Interfaces {
 		if len(info.Subnets) > 0 {
-			return info.Subnets[0].IPNet, info.MacAddress, nil
+			networks = append(networks, NetworkInfo{
+				IP:      info.Subnets[0].IPNet,
+				MAC:     info.MacAddress,
+				Gateway: info.Subnets[0].Gateway,
+			})
 		}
 	}
 
-	return "", "", nil
+	return networks, nil
 }
